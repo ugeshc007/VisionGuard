@@ -13,6 +13,9 @@ const state = {
   privacy: null,
   localStream: null,
   autoCaptureTimer: null,
+  autoCaptureBusy: false,
+  activeCaptureCameraId: "",
+  captureSessionStats: { attempts: 0, saved: 0, skipped: 0 },
   trackingFrame: null,
   blazeFaceModel: null,
   faceDetectorMode: "idle",
@@ -55,6 +58,7 @@ const els = {
   localCameraVideo: $("#localCameraVideo"),
   localCameraCanvas: $("#localCameraCanvas"),
   faceDetectorStatus: $("#faceDetectorStatus"),
+  startLocalCameraButton: $("#startLocalCameraButton"),
   autoCaptureButton: $("#autoCaptureButton"),
   runFaceRetentionButton: $("#runFaceRetentionButton"),
   cameraViewer: $("#cameraViewer"),
@@ -696,8 +700,8 @@ function bindActions() {
   $("#simulateEventButton").addEventListener("click", simulateEvent);
   $("#simulateFromAlerts").addEventListener("click", simulateEvent);
   $("#addLocalCameraButton").addEventListener("click", addLocalCamera);
-  $("#startLocalCameraButton").addEventListener("click", startLocalCamera);
-  $("#captureFacesButton").addEventListener("click", captureFacesToDb);
+  $("#startLocalCameraButton").addEventListener("click", startSelectedCamera);
+  $("#captureFacesButton").addEventListener("click", () => captureFacesToDb());
   $("#autoCaptureButton").addEventListener("click", toggleAutoCapture);
   $("#processFacesButton").addEventListener("click", processPendingFaces);
   $("#checkStreamGatewayButton")?.addEventListener("click", checkStreamGateway);
@@ -721,6 +725,11 @@ function bindActions() {
       $$("[data-face-tab]").forEach((item) => item.classList.toggle("active", item === button));
       renderFaceTrainingGrid();
     });
+  });
+  els.localCameraSelect?.addEventListener("change", () => {
+    if (state.autoCaptureTimer) {
+      stopAutoCapture("Camera selection changed. Detection stopped.");
+    }
   });
   document.addEventListener("click", async (event) => {
     const openCameraButton = event.target.closest("[data-open-camera]");
@@ -905,14 +914,27 @@ async function startLocalCamera() {
   return true;
 }
 
-async function captureFacesToDb() {
+async function startSelectedCamera() {
   const selectedCamera = selectedCaptureCamera();
+  if (!selectedCamera) {
+    els.faceDetectorStatus.textContent = "Add or select a camera first.";
+    return;
+  }
+  if (state.autoCaptureTimer) {
+    els.faceDetectorStatus.textContent = `Detection is already running for ${selectedCamera.name}. Use Stop detection to stop it.`;
+    return;
+  }
+  await toggleAutoCapture();
+}
+
+async function captureFacesToDb(options = {}) {
+  const selectedCamera = options.camera || selectedCaptureCamera();
   if (selectedCamera && isRemoteFrameCamera(selectedCamera) && !isBrowserLocalCamera(selectedCamera)) {
-    return captureFacesFromRemoteCamera(selectedCamera);
+    return captureFacesFromRemoteCamera(selectedCamera, options);
   }
   if (!els.localCameraVideo.srcObject) {
     const started = await startLocalCamera();
-    if (!started) return;
+    if (!started) return { detected: 0, saved: 0, skipped: 0 };
   }
   const video = els.localCameraVideo;
   await waitForVideoReady(video);
@@ -928,16 +950,16 @@ async function captureFacesToDb() {
   drawFaceBoxes(context, boxes);
   if (!boxes.length) {
     els.faceDetectorStatus.textContent = `No face detected. Nothing saved. Detector: ${state.faceDetectorMode}.`;
-    toast("No face detected.");
-    return;
+    if (!options.silent) toast("No face detected.");
+    return { detected: 0, saved: 0, skipped: 0 };
   }
   const candidates = boxes.map((box, index) => buildFacePayload(context, box, index));
-  const faces = filterNewFaceCandidates(candidates);
+  const faces = options.skipClientDuplicateFilter ? candidates : filterNewFaceCandidates(candidates);
   if (!faces.length) {
     const tracked = candidates.filter((candidate) => candidate.trackId && isTrackRecentlyCaptured(candidate.trackId)).length;
     els.faceDetectorStatus.textContent = `Detected ${boxes.length} face(s), but ${tracked || "all"} matched existing tracked/known faces. New person not saved.`;
-    toast("Known/recent face skipped.");
-    return;
+    if (!options.silent) toast("Known/recent face skipped.");
+    return { detected: boxes.length, saved: 0, skipped: candidates.length };
   }
   const imageData = canvas.toDataURL("image/jpeg", .86);
   const result = await api("/api/captures", {
@@ -955,9 +977,10 @@ async function captureFacesToDb() {
   const skipped = (candidates.length - faces.length) + Number(result.skippedFaces?.length || 0);
   const reason = summarizeSkippedFaces(result.skippedFaces);
   els.faceDetectorStatus.textContent = `Detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.${reason ? ` ${reason}` : ""}`;
-  toast(result.faces.length ? `Saved ${result.faces.length} new face(s) to PostgreSQL.` : (reason || "Face already tracked. No duplicate image saved."));
+  if (!options.silent) toast(result.faces.length ? `Saved ${result.faces.length} new face(s) to PostgreSQL.` : (reason || "Face already tracked. No duplicate image saved."));
   await processPendingFaces(false);
   await loadAll();
+  return { detected: boxes.length, saved: result.faces.length, skipped };
 }
 
 async function loadImage(url) {
@@ -969,7 +992,7 @@ async function loadImage(url) {
   });
 }
 
-async function captureFacesFromRemoteCamera(camera) {
+async function captureFacesFromRemoteCamera(camera, options = {}) {
   if (!camera?.id) throw new Error("Select a camera first.");
   const image = await loadImage(`/api/cameras/${encodeURIComponent(camera.id)}/frame?t=${Date.now()}`);
   const canvas = els.localCameraCanvas;
@@ -984,16 +1007,16 @@ async function captureFacesFromRemoteCamera(camera) {
   drawFaceBoxes(context, boxes);
   if (!boxes.length) {
     els.faceDetectorStatus.textContent = `No face detected from ${camera.name}. Detector: ${state.faceDetectorMode}.`;
-    toast("No face detected.");
-    return;
+    if (!options.silent) toast("No face detected.");
+    return { detected: 0, saved: 0, skipped: 0 };
   }
   const candidates = boxes.map((box, index) => buildFacePayload(context, box, index));
-  const faces = filterNewFaceCandidates(candidates);
+  const faces = options.skipClientDuplicateFilter === false ? filterNewFaceCandidates(candidates) : candidates;
   if (!faces.length) {
     const tracked = candidates.filter((candidate) => candidate.trackId && isTrackRecentlyCaptured(candidate.trackId)).length;
     els.faceDetectorStatus.textContent = `Detected ${boxes.length} face(s) from ${camera.name}, but ${tracked || "all"} matched existing tracked/known faces.`;
-    toast("Known/recent face skipped.");
-    return;
+    if (!options.silent) toast("Known/recent face skipped.");
+    return { detected: boxes.length, saved: 0, skipped: candidates.length };
   }
   const imageData = canvas.toDataURL("image/jpeg", .86);
   const result = await api("/api/captures", {
@@ -1011,9 +1034,10 @@ async function captureFacesFromRemoteCamera(camera) {
   const skipped = (candidates.length - faces.length) + Number(result.skippedFaces?.length || 0);
   const reason = summarizeSkippedFaces(result.skippedFaces);
   els.faceDetectorStatus.textContent = `RTSP ${camera.name}: detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.${reason ? ` ${reason}` : ""}`;
-  toast(result.faces.length ? `Saved ${result.faces.length} RTSP face(s).` : (reason || "Face already tracked. No duplicate image saved."));
+  if (!options.silent) toast(result.faces.length ? `Saved ${result.faces.length} RTSP face(s).` : (reason || "Face already tracked. No duplicate image saved."));
   await processPendingFaces(false);
   await loadAll();
+  return { detected: boxes.length, saved: result.faces.length, skipped };
 }
 
 function summarizeSkippedFaces(skippedFaces = []) {
@@ -1023,12 +1047,25 @@ function summarizeSkippedFaces(skippedFaces = []) {
   return reason ? `First skipped reason: ${reason}.` : "";
 }
 
+function updateCaptureSessionStatus(camera, latest = "") {
+  const stats = state.captureSessionStats;
+  const last = latest ? ` Last: ${latest}` : "";
+  els.faceDetectorStatus.textContent = `Detection running for ${camera?.name || "selected camera"} | attempts ${stats.attempts} | saved ${stats.saved} | skipped ${stats.skipped}.${last}`;
+}
+
+function stopAutoCapture(message = "AI auto capture stopped.") {
+  if (state.autoCaptureTimer) clearInterval(state.autoCaptureTimer);
+  state.autoCaptureTimer = null;
+  state.autoCaptureBusy = false;
+  state.activeCaptureCameraId = "";
+  els.autoCaptureButton.textContent = "Start AI auto capture";
+  els.startLocalCameraButton.textContent = "Start selected camera";
+  els.faceDetectorStatus.textContent = message;
+}
+
 async function toggleAutoCapture() {
   if (state.autoCaptureTimer) {
-    clearInterval(state.autoCaptureTimer);
-    state.autoCaptureTimer = null;
-    els.autoCaptureButton.textContent = "Start AI auto capture";
-    els.faceDetectorStatus.textContent = "AI auto capture stopped.";
+    stopAutoCapture("Detection stopped.");
     return;
   }
   const selectedCamera = selectedCaptureCamera();
@@ -1040,16 +1077,30 @@ async function toggleAutoCapture() {
     const started = await startLocalCamera();
     if (!started) return;
   }
-  els.autoCaptureButton.textContent = "Stop AI auto capture";
-  els.faceDetectorStatus.textContent = `AI auto capture active for ${selectedCamera.name}. New faces are saved; duplicates are skipped.`;
-  await captureFacesToDb().catch((error) => {
-    els.faceDetectorStatus.textContent = error.message;
-  });
-  state.autoCaptureTimer = setInterval(() => {
-    captureFacesToDb().catch((error) => {
+  state.activeCaptureCameraId = selectedCamera.id;
+  state.captureSessionStats = { attempts: 0, saved: 0, skipped: 0 };
+  els.autoCaptureButton.textContent = "Stop detection";
+  els.startLocalCameraButton.textContent = "Detection running";
+  updateCaptureSessionStatus(selectedCamera, "starting");
+  const runCaptureTick = async () => {
+    if (state.autoCaptureBusy) return;
+    state.autoCaptureBusy = true;
+    try {
+      const camera = state.cameras.find((item) => item.id === state.activeCaptureCameraId) || selectedCamera;
+      const result = await captureFacesToDb({ camera, skipClientDuplicateFilter: true, silent: true });
+      state.captureSessionStats.attempts += 1;
+      state.captureSessionStats.saved += Number(result?.saved || 0);
+      state.captureSessionStats.skipped += Number(result?.skipped || 0);
+      updateCaptureSessionStatus(camera, result?.detected ? `${result.detected} face(s) detected` : "no face");
+    } catch (error) {
       els.faceDetectorStatus.textContent = error.message;
-    });
-  }, 4500);
+    } finally {
+      state.autoCaptureBusy = false;
+    }
+  };
+  await runCaptureTick();
+  const interval = Math.max(2500, Number(selectedCamera.detectionIntervalMs || 4500));
+  state.autoCaptureTimer = setInterval(runCaptureTick, interval);
 }
 
 async function startFaceTracking() {
