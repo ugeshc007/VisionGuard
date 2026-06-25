@@ -8,6 +8,7 @@ This guide moves VisionGuard AI to another PC with PostgreSQL, pgvector, Face AI
 - Git
 - Docker Desktop
 - Node.js 20+ if running outside Docker
+- FFmpeg if running outside Docker (`ffmpeg` must be available in PATH)
 - Same network access for cameras/RTSP streams
 
 ## 2. Clone The Project
@@ -153,7 +154,27 @@ git push -u origin main
 - `visionguard-face-ai`: InsightFace embedding service
 - `visionguard-stream-gateway`: RTSP/HLS/WebRTC stream gateway
 
-## 12. Production Notes
+## 12. RTSP AI Auto Capture
+
+For CCTV cameras, add the RTSP URL in the camera configuration, for example:
+
+```text
+rtsp://admin:PASSWORD@192.168.1.182:554/Streaming/Channels/402
+```
+
+When this RTSP camera is selected in the Camera page, **Start AI auto capture** uses server-side FFmpeg snapshots instead of the browser webcam. This avoids browser errors such as:
+
+```text
+NotFoundError: Requested device not found
+```
+
+Docker installs FFmpeg automatically. For non-Docker Windows deployment, install FFmpeg and set:
+
+```text
+FFMPEG_BIN=C:\ffmpeg\bin\ffmpeg.exe
+```
+
+## 13. Production Notes
 
 - Change PostgreSQL password before production.
 - Do not commit `.env`.

@@ -195,6 +195,19 @@ function renderForms() {
     : `<option value="">Add Local Camera first</option>`;
 }
 
+function selectedCaptureCamera() {
+  const selectedId = els.localCameraSelect.value || state.cameras[0]?.id || "";
+  return state.cameras.find((camera) => camera.id === selectedId) || state.cameras[0] || null;
+}
+
+function isBrowserLocalCamera(camera = {}) {
+  return String(camera.streamUrl || "").startsWith("local://");
+}
+
+function isRemoteFrameCamera(camera = {}) {
+  return /^(rtsp|rtsps|http|https):\/\//i.test(String(camera.streamUrl || ""));
+}
+
 function renderManagementViews() {
   els.cameraManagerGrid.innerHTML = state.cameras.length ? state.cameras.map((camera) => cameraCard(camera, true)).join("") : `<div class="empty-state">No cameras yet. Create a site, then add Local Camera or RTSP camera.</div>`;
   els.peopleGrid.innerHTML = state.people.length ? state.people.map((p) => `
@@ -857,6 +870,10 @@ async function startLocalCamera() {
 }
 
 async function captureFacesToDb() {
+  const selectedCamera = selectedCaptureCamera();
+  if (selectedCamera && isRemoteFrameCamera(selectedCamera) && !isBrowserLocalCamera(selectedCamera)) {
+    return captureFacesFromRemoteCamera(selectedCamera);
+  }
   if (!els.localCameraVideo.srcObject) {
     await startLocalCamera();
   }
@@ -886,11 +903,10 @@ async function captureFacesToDb() {
     return;
   }
   const imageData = canvas.toDataURL("image/jpeg", .86);
-  const selectedCamera = els.localCameraSelect.value || state.cameras[0]?.id || "";
   const result = await api("/api/captures", {
     method: "POST",
     body: JSON.stringify({
-      cameraId: selectedCamera,
+      cameraId: selectedCamera?.id || "",
       source: "local-camera",
       imageData,
       width,
@@ -906,6 +922,61 @@ async function captureFacesToDb() {
   await loadAll();
 }
 
+async function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load camera snapshot."));
+    image.src = url;
+  });
+}
+
+async function captureFacesFromRemoteCamera(camera) {
+  if (!camera?.id) throw new Error("Select a camera first.");
+  const image = await loadImage(`/api/cameras/${encodeURIComponent(camera.id)}/frame?t=${Date.now()}`);
+  const canvas = els.localCameraCanvas;
+  const width = image.naturalWidth || image.width || 1280;
+  const height = image.naturalHeight || image.height || 720;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, width, height);
+  const detectedBoxes = await detectFaceBoxes(canvas, width, height);
+  const boxes = stabilizeFaceBoxes(context, detectedBoxes);
+  drawFaceBoxes(context, boxes);
+  if (!boxes.length) {
+    els.faceDetectorStatus.textContent = `No face detected from ${camera.name}. Detector: ${state.faceDetectorMode}.`;
+    toast("No face detected.");
+    return;
+  }
+  const candidates = boxes.map((box, index) => buildFacePayload(context, box, index));
+  const faces = filterNewFaceCandidates(candidates);
+  if (!faces.length) {
+    const tracked = candidates.filter((candidate) => candidate.trackId && isTrackRecentlyCaptured(candidate.trackId)).length;
+    els.faceDetectorStatus.textContent = `Detected ${boxes.length} face(s) from ${camera.name}, but ${tracked || "all"} matched existing tracked/known faces.`;
+    toast("Known/recent face skipped.");
+    return;
+  }
+  const imageData = canvas.toDataURL("image/jpeg", .86);
+  const result = await api("/api/captures", {
+    method: "POST",
+    body: JSON.stringify({
+      cameraId: camera.id,
+      source: "rtsp-frame",
+      imageData,
+      width,
+      height,
+      faces
+    })
+  });
+  markTracksCaptured(faces.map((face) => face.trackId));
+  const skipped = (candidates.length - faces.length) + Number(result.skippedFaces?.length || 0);
+  els.faceDetectorStatus.textContent = `RTSP ${camera.name}: detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.`;
+  toast(result.faces.length ? `Saved ${result.faces.length} RTSP face(s).` : "Face already tracked. No duplicate image saved.");
+  await processPendingFaces(false);
+  await loadAll();
+}
+
 async function toggleAutoCapture() {
   if (state.autoCaptureTimer) {
     clearInterval(state.autoCaptureTimer);
@@ -914,9 +985,16 @@ async function toggleAutoCapture() {
     els.faceDetectorStatus.textContent = "AI auto capture stopped.";
     return;
   }
-  if (!els.localCameraVideo.srcObject) await startLocalCamera();
+  const selectedCamera = selectedCaptureCamera();
+  if (!selectedCamera) {
+    els.faceDetectorStatus.textContent = "Add or select a camera first.";
+    return;
+  }
+  if (isBrowserLocalCamera(selectedCamera) && !els.localCameraVideo.srcObject) {
+    await startLocalCamera();
+  }
   els.autoCaptureButton.textContent = "Stop AI auto capture";
-  els.faceDetectorStatus.textContent = "AI auto capture active. New faces are saved; duplicates are skipped.";
+  els.faceDetectorStatus.textContent = `AI auto capture active for ${selectedCamera.name}. New faces are saved; duplicates are skipped.`;
   await captureFacesToDb().catch((error) => {
     els.faceDetectorStatus.textContent = error.message;
   });

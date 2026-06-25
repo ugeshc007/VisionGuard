@@ -20,6 +20,7 @@ const faceEmbeddingUrl = process.env.FACE_EMBEDDING_URL || "http://127.0.0.1:809
 const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
 const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
 const pythonCommand = process.env.PYTHON || "python";
+const ffmpegCommand = process.env.FFMPEG_BIN || "ffmpeg";
 let lastFaceRetentionRunDate = "";
 
 const pool = new Pool({ connectionString: databaseUrl });
@@ -398,6 +399,46 @@ function isGatewayPlayable(streamUrl = "") {
   return /^(rtsp|rtsps|http|https):\/\//i.test(String(streamUrl || ""));
 }
 
+function captureCameraFrame(camera = {}) {
+  const streamUrl = String(camera.streamUrl || "").trim();
+  if (!isGatewayPlayable(streamUrl)) throw new Error("Selected camera does not have an RTSP/HTTP stream URL.");
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-hide_banner",
+      "-loglevel", "error",
+      "-rtsp_transport", "tcp",
+      "-i", streamUrl,
+      "-frames:v", "1",
+      "-q:v", "3",
+      "-f", "image2pipe",
+      "-vcodec", "mjpeg",
+      "pipe:1"
+    ];
+    const child = spawn(ffmpegCommand, args, { windowsHide: true });
+    const chunks = [];
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Timed out while capturing RTSP frame. Check stream URL, network, and camera credentials."));
+    }, Number(process.env.RTSP_FRAME_TIMEOUT_MS || 12000));
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`Could not run ffmpeg for RTSP capture: ${error.message}`));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const buffer = Buffer.concat(chunks);
+      if (code !== 0 || !buffer.length) {
+        reject(new Error(stderr.trim() || `ffmpeg exited ${code} without a frame.`));
+        return;
+      }
+      resolve(buffer);
+    });
+  });
+}
+
 function enrichCameraStream(camera = {}) {
   const alias = cameraAlias(camera);
   const streamUrl = String(camera.streamUrl || "");
@@ -733,6 +774,22 @@ async function handleApi(req, res, url) {
     if (!result.rows[0]) return sendJson(res, 404, { message: "Capture not found" });
     res.writeHead(200, { "content-type": result.rows[0].image_mime || "image/jpeg" });
     return res.end(result.rows[0].image_data);
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/cameras/") && path.endsWith("/frame")) {
+    const cameraId = decodeURIComponent(path.split("/")[3]);
+    const camera = await one("SELECT * FROM cameras WHERE id = $1", [cameraId]);
+    if (!camera) return sendJson(res, 404, { message: "Camera not found" });
+    try {
+      const frame = await captureCameraFrame(camera);
+      res.writeHead(200, {
+        "content-type": "image/jpeg",
+        "cache-control": "no-store"
+      });
+      return res.end(frame);
+    } catch (error) {
+      return sendJson(res, 502, { message: error.message || "Could not capture camera frame" });
+    }
   }
 
   if (req.method === "POST" && path === "/api/captures") {
