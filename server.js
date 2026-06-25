@@ -18,6 +18,7 @@ const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visiongu
 const faceEmbeddingProvider = process.env.FACE_EMBEDDING_PROVIDER || "hybrid";
 const faceEmbeddingUrl = process.env.FACE_EMBEDDING_URL || "http://127.0.0.1:8091/embed";
 const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
+const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
 const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
 const pythonCommand = process.env.PYTHON || "python";
 const ffmpegCommand = process.env.FFMPEG_BIN || "ffmpeg";
@@ -229,8 +230,8 @@ function scoreFaceQualityDetailed(face = {}, camera = {}) {
   const width = Number(box.width || 0);
   const height = Number(box.height || 0);
   const faceArea = Math.round(width * height);
-  const minSize = Number(camera.minFaceSize || 80);
-  const qualityThreshold = Number(camera.qualityThreshold || 62);
+  const minSize = Number(camera.minFaceSize || 48);
+  const qualityThreshold = Number(camera.qualityThreshold || 45);
   const confidence = Number(face.confidence || 0);
   const sharpness = Number(face.sharpness || 0);
   const areaScore = Math.min(45, Math.round(faceArea / 1200));
@@ -459,10 +460,11 @@ function enrichCameraStream(camera = {}) {
     health: status === "online" || status === "local-only" ? Number(camera.health || 0) : 0,
     streamAlias: alias,
     gatewayUrl: streamGatewayUrl,
+    publicGatewayUrl: publicStreamGatewayUrl,
     playable,
-    hlsUrl: playable ? `${streamGatewayUrl}/api/stream.m3u8?src=${src}` : "",
-    webrtcPageUrl: playable ? `${streamGatewayUrl}/stream.html?src=${src}` : "",
-    mjpegUrl: playable ? `${streamGatewayUrl}/api/frame.jpeg?src=${src}` : "",
+    hlsUrl: playable ? `${publicStreamGatewayUrl}/api/stream.m3u8?src=${src}` : "",
+    webrtcPageUrl: playable ? `${publicStreamGatewayUrl}/stream.html?src=${src}` : "",
+    mjpegUrl: playable ? `${publicStreamGatewayUrl}/api/frame.jpeg?src=${src}` : "",
     streamStatus: playable ? "gateway-ready" : streamUrl ? "local-or-unsupported" : "no-stream"
   };
 }
@@ -1975,6 +1977,11 @@ function sendSnapshot(res, eventId) {
 }
 
 async function serveStatic(req, res, url) {
+  if (url.pathname === "/favicon.ico") {
+    res.writeHead(204, { "cache-control": "public, max-age=86400" });
+    res.end();
+    return;
+  }
   const safePath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   const filePath = join(publicDir, safePath.replace(/^\/+/, ""));
   try {

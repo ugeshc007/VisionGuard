@@ -28,6 +28,7 @@ services:
       FACE_EMBEDDING_PROVIDER: hybrid
       FACE_EMBEDDING_URL: http://face-ai:8091/embed
       STREAM_GATEWAY_URL: http://stream-gateway:1984
+      PUBLIC_STREAM_GATEWAY_URL: http://localhost:1984
       BUSINESS_TIMEZONE: Asia/Dubai
     ports:
       - "7070:7070"

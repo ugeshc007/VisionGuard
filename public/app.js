@@ -100,6 +100,9 @@ function localizeGatewayUrl(value = "") {
   if (!value) return "";
   try {
     const url = new URL(value);
+    if (url.hostname === "stream-gateway") {
+      url.hostname = location.hostname;
+    }
     if (["127.0.0.1", "localhost"].includes(url.hostname) && !["127.0.0.1", "localhost"].includes(location.hostname)) {
       url.hostname = location.hostname;
     }
@@ -253,6 +256,7 @@ function renderCameraWall() {
 
 function cameraCard(camera, manager = false) {
   const hlsUrl = localizeGatewayUrl(camera.hlsUrl);
+  const webrtcUrl = localizeGatewayUrl(camera.webrtcPageUrl);
   const playable = camera.playable && hlsUrl;
   const tuning = manager ? `
     <form class="camera-tuning" data-camera-tuning="${camera.id}">
@@ -264,8 +268,8 @@ function cameraCard(camera, manager = false) {
       </label>
       <label>Area name<input name="zone" value="${escapeHtml(camera.zone || "")}" placeholder="Lobby / Entrance" /></label>
       <label class="full-row">Camera link / RTSP URL<input name="streamUrl" value="${escapeHtml(camera.streamUrl || "")}" placeholder="rtsp://user:pass@ip/Streaming/Channels/402" /></label>
-      <label>Min face px<input name="minFaceSize" type="number" min="40" max="320" value="${Number(camera.minFaceSize || 80)}" /></label>
-      <label>Quality %<input name="qualityThreshold" type="number" min="30" max="95" value="${Number(camera.qualityThreshold || 62)}" /></label>
+      <label>Min face px<input name="minFaceSize" type="number" min="32" max="320" value="${Number(camera.minFaceSize || 48)}" /></label>
+      <label>Quality %<input name="qualityThreshold" type="number" min="25" max="95" value="${Number(camera.qualityThreshold || 45)}" /></label>
       <label>Interval ms<input name="detectionIntervalMs" type="number" min="250" max="5000" value="${Number(camera.detectionIntervalMs || 650)}" /></label>
       <label>Match %<input name="recognitionThreshold" type="number" min="0.70" max="0.99" step="0.01" value="${Number(camera.recognitionThreshold || .82)}" /></label>
       <label>Retention days<input name="retentionDays" type="number" min="1" max="365" value="${Number(camera.retentionDays || 30)}" /></label>
@@ -289,7 +293,8 @@ function cameraCard(camera, manager = false) {
         <strong>${escapeHtml(camera.zone || camera.name)}</strong>
         <small>${siteName(camera.siteId)} | ${cameraRoleLabel(camera.cameraRole)} | ${camera.fps} FPS | Health ${camera.health}%</small>
         <small title="${escapeHtml(camera.streamUrl || "")}">Link: ${escapeHtml(camera.streamUrl ? camera.streamUrl : "No stream URL configured")}</small>
-        <small>AI: min ${Number(camera.minFaceSize || 80)}px | quality ${Number(camera.qualityThreshold || 62)}% | ${Number(camera.detectionIntervalMs || 650)}ms</small>
+        ${webrtcUrl ? `<small><a href="${escapeHtml(webrtcUrl)}" target="_blank" rel="noreferrer">Open low-latency WebRTC preview</a></small>` : ""}
+        <small>AI: min ${Number(camera.minFaceSize || 48)}px | quality ${Number(camera.qualityThreshold || 45)}% | ${Number(camera.detectionIntervalMs || 650)}ms</small>
         <div class="bar"><span style="width:${Math.max(6, Number(camera.health || 0))}%"></span></div>
       </div>
       ${tuning}
@@ -948,8 +953,9 @@ async function captureFacesToDb() {
   });
   markTracksCaptured(faces.map((face) => face.trackId));
   const skipped = (candidates.length - faces.length) + Number(result.skippedFaces?.length || 0);
-  els.faceDetectorStatus.textContent = `Detected ${boxes.length}. Saved ${result.faces.length} new face(s). Tracked/skipped ${skipped} duplicate(s).`;
-  toast(result.faces.length ? `Saved ${result.faces.length} new face(s) to PostgreSQL.` : "Face already tracked. No duplicate image saved.");
+  const reason = summarizeSkippedFaces(result.skippedFaces);
+  els.faceDetectorStatus.textContent = `Detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.${reason ? ` ${reason}` : ""}`;
+  toast(result.faces.length ? `Saved ${result.faces.length} new face(s) to PostgreSQL.` : (reason || "Face already tracked. No duplicate image saved."));
   await processPendingFaces(false);
   await loadAll();
 }
@@ -1003,10 +1009,18 @@ async function captureFacesFromRemoteCamera(camera) {
   });
   markTracksCaptured(faces.map((face) => face.trackId));
   const skipped = (candidates.length - faces.length) + Number(result.skippedFaces?.length || 0);
-  els.faceDetectorStatus.textContent = `RTSP ${camera.name}: detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.`;
-  toast(result.faces.length ? `Saved ${result.faces.length} RTSP face(s).` : "Face already tracked. No duplicate image saved.");
+  const reason = summarizeSkippedFaces(result.skippedFaces);
+  els.faceDetectorStatus.textContent = `RTSP ${camera.name}: detected ${boxes.length}. Saved ${result.faces.length} new face(s). Skipped ${skipped}.${reason ? ` ${reason}` : ""}`;
+  toast(result.faces.length ? `Saved ${result.faces.length} RTSP face(s).` : (reason || "Face already tracked. No duplicate image saved."));
   await processPendingFaces(false);
   await loadAll();
+}
+
+function summarizeSkippedFaces(skippedFaces = []) {
+  if (!Array.isArray(skippedFaces) || !skippedFaces.length) return "";
+  const first = skippedFaces[0] || {};
+  const reason = [first.reason, first.detail].filter(Boolean).join(": ");
+  return reason ? `First skipped reason: ${reason}.` : "";
 }
 
 async function toggleAutoCapture() {
