@@ -1,6 +1,6 @@
 # VisionGuard AI Deployment Guide
 
-This guide moves VisionGuard AI to another PC with PostgreSQL, pgvector, Face AI, stream gateway, web app, worker, migrations, and seed data.
+This guide moves VisionGuard AI to another PC with PostgreSQL, pgvector, Face AI, stream gateway, web app, worker, and migrations for live camera testing.
 
 ## 1. Requirements
 
@@ -47,15 +47,17 @@ node tools/migrate-db.js
 
 before starting the server.
 
-## 5. Seed Baseline Data
+## 5. Live Data Only
 
-Run this once after first deployment if you want the default site/camera/rules/users:
+For live testing, do not run the seed command. Add real sites, cameras, rules, and staff from the UI.
+
+If you need demo data on a development laptop only, run:
 
 ```powershell
 docker compose exec web node tools/seed-db.js
 ```
 
-Seed data is idempotent, so running it again updates the same baseline records instead of duplicating them.
+Seed data is idempotent, but it creates demo-looking cameras and people, so avoid it on production/live test servers.
 
 ## 6. Open The App
 
@@ -76,7 +78,6 @@ Local Node mode:
 ```powershell
 npm install
 npm run db:migrate
-npm run db:seed
 npm start
 ```
 
@@ -84,7 +85,6 @@ Docker mode:
 
 ```powershell
 docker compose exec web node tools/migrate-db.js
-docker compose exec web node tools/seed-db.js
 ```
 
 ## 8. Add A New Migration

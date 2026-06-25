@@ -191,8 +191,8 @@ function renderForms() {
     ? state.cameras.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")
     : `<option value="">Add a camera first</option>`;
   els.localCameraSelect.innerHTML = state.cameras.length
-    ? state.cameras.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")
-    : `<option value="">Add Local Camera first</option>`;
+    ? state.cameras.map((c) => `<option value="${c.id}">${escapeHtml(c.name)} - ${isRemoteFrameCamera(c) ? "RTSP/HTTP snapshot" : "Local browser camera"}</option>`).join("")
+    : `<option value="">Add RTSP or Local Camera first</option>`;
 }
 
 function selectedCaptureCamera() {
@@ -256,12 +256,14 @@ function cameraCard(camera, manager = false) {
   const playable = camera.playable && hlsUrl;
   const tuning = manager ? `
     <form class="camera-tuning" data-camera-tuning="${camera.id}">
+      <label>Camera name<input name="name" value="${escapeHtml(camera.name || "")}" placeholder="Main gate camera" /></label>
       <label>Role
         <select name="cameraRole">
           ${["area", "entry", "exit"].map((role) => `<option value="${role}" ${camera.cameraRole === role ? "selected" : ""}>${cameraRoleLabel(role)}</option>`).join("")}
         </select>
       </label>
       <label>Area name<input name="zone" value="${escapeHtml(camera.zone || "")}" placeholder="Lobby / Entrance" /></label>
+      <label class="full-row">Camera link / RTSP URL<input name="streamUrl" value="${escapeHtml(camera.streamUrl || "")}" placeholder="rtsp://user:pass@ip/Streaming/Channels/402" /></label>
       <label>Min face px<input name="minFaceSize" type="number" min="40" max="320" value="${Number(camera.minFaceSize || 80)}" /></label>
       <label>Quality %<input name="qualityThreshold" type="number" min="30" max="95" value="${Number(camera.qualityThreshold || 62)}" /></label>
       <label>Interval ms<input name="detectionIntervalMs" type="number" min="250" max="5000" value="${Number(camera.detectionIntervalMs || 650)}" /></label>
@@ -269,6 +271,7 @@ function cameraCard(camera, manager = false) {
       <label>Retention days<input name="retentionDays" type="number" min="1" max="365" value="${Number(camera.retentionDays || 30)}" /></label>
       <label class="inline-check"><input name="blurUntrusted" type="checkbox" ${camera.blurUntrusted ? "checked" : ""} /> Blur untrusted exports</label>
       <button type="submit">Save camera tuning</button>
+      <button type="button" class="danger-button" data-delete-camera="${camera.id}" data-camera-name="${escapeHtml(camera.name)}">Delete camera</button>
     </form>
   ` : "";
   return `
@@ -283,8 +286,9 @@ function cameraCard(camera, manager = false) {
       </div>
       <div class="camera-meta">
         <span class="status ${statusClass(camera.status)}">${escapeHtml(camera.status)}</span>
-        <strong>${escapeHtml(camera.zone)}</strong>
+        <strong>${escapeHtml(camera.zone || camera.name)}</strong>
         <small>${siteName(camera.siteId)} | ${cameraRoleLabel(camera.cameraRole)} | ${camera.fps} FPS | Health ${camera.health}%</small>
+        <small title="${escapeHtml(camera.streamUrl || "")}">Link: ${escapeHtml(camera.streamUrl ? camera.streamUrl : "No stream URL configured")}</small>
         <small>AI: min ${Number(camera.minFaceSize || 80)}px | quality ${Number(camera.qualityThreshold || 62)}% | ${Number(camera.detectionIntervalMs || 650)}ms</small>
         <div class="bar"><span style="width:${Math.max(6, Number(camera.health || 0))}%"></span></div>
       </div>
@@ -736,6 +740,17 @@ function bindActions() {
       await loadAll();
       return;
     }
+    const deleteCameraButton = event.target.closest("[data-delete-camera]");
+    if (deleteCameraButton) {
+      const cameraId = deleteCameraButton.dataset.deleteCamera;
+      const cameraName = deleteCameraButton.dataset.cameraName || "this camera";
+      const confirmed = window.confirm(`Delete ${cameraName}? Existing captures and events remain for audit, but the camera will be removed from live monitoring.`);
+      if (!confirmed) return;
+      await api(`/api/cameras/${encodeURIComponent(cameraId)}`, { method: "DELETE" });
+      toast("Camera deleted.");
+      await loadAll();
+      return;
+    }
     const splitFaceButton = event.target.closest("[data-split-face]");
     if (splitFaceButton) {
       const faceId = splitFaceButton.dataset.splitFace;
@@ -854,19 +869,35 @@ async function addLocalCamera() {
 }
 
 async function startLocalCamera() {
+  const selectedCamera = selectedCaptureCamera();
+  if (selectedCamera && !isBrowserLocalCamera(selectedCamera)) {
+    els.faceDetectorStatus.textContent = `${selectedCamera.name} is an RTSP/HTTP camera. Use Detect faces or Start AI auto capture; VisionGuard will capture snapshots through server-side FFmpeg.`;
+    toast("Selected camera uses RTSP snapshot capture.");
+    return false;
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
     toast("This browser does not support camera capture.");
-    return;
+    return false;
   }
   if (state.localStream) {
     state.localStream.getTracks().forEach((track) => track.stop());
   }
-  state.localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+  try {
+    state.localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+  } catch (error) {
+    const message = error?.name === "NotFoundError"
+      ? "No laptop webcam was found on this browser/device. Select an RTSP camera and use AI auto capture, or connect a webcam."
+      : `Could not start laptop camera: ${error.message || error.name || "permission/device error"}`;
+    els.faceDetectorStatus.textContent = message;
+    toast(message);
+    return false;
+  }
   els.localCameraVideo.srcObject = state.localStream;
   await waitForVideoReady(els.localCameraVideo);
   startFaceTracking();
   els.faceDetectorStatus.textContent = "Camera started. Tracking face boxes from the camera feed.";
   toast("Laptop camera started.");
+  return true;
 }
 
 async function captureFacesToDb() {
@@ -875,7 +906,8 @@ async function captureFacesToDb() {
     return captureFacesFromRemoteCamera(selectedCamera);
   }
   if (!els.localCameraVideo.srcObject) {
-    await startLocalCamera();
+    const started = await startLocalCamera();
+    if (!started) return;
   }
   const video = els.localCameraVideo;
   await waitForVideoReady(video);
@@ -991,7 +1023,8 @@ async function toggleAutoCapture() {
     return;
   }
   if (isBrowserLocalCamera(selectedCamera) && !els.localCameraVideo.srcObject) {
-    await startLocalCamera();
+    const started = await startLocalCamera();
+    if (!started) return;
   }
   els.autoCaptureButton.textContent = "Stop AI auto capture";
   els.faceDetectorStatus.textContent = `AI auto capture active for ${selectedCamera.name}. New faces are saved; duplicates are skipped.`;

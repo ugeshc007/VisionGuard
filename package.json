@@ -9,7 +9,7 @@
     "worker": "node worker.js",
     "db:migrate": "node tools/migrate-db.js",
     "db:seed": "node tools/seed-db.js",
-    "deploy:prepare": "npm run db:migrate && npm run db:seed"
+    "deploy:prepare": "npm run db:migrate"
   },
   "dependencies": {
     "pg": "^8.16.3"

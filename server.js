@@ -399,6 +399,14 @@ function isGatewayPlayable(streamUrl = "") {
   return /^(rtsp|rtsps|http|https):\/\//i.test(String(streamUrl || ""));
 }
 
+function cameraStatusFromSource(camera = {}) {
+  const streamUrl = String(camera.streamUrl || "").trim();
+  if (String(camera.status || "").toLowerCase() === "disabled") return "disabled";
+  if (isGatewayPlayable(streamUrl)) return "online";
+  if (streamUrl.startsWith("local://")) return "local-only";
+  return "offline";
+}
+
 function captureCameraFrame(camera = {}) {
   const streamUrl = String(camera.streamUrl || "").trim();
   if (!isGatewayPlayable(streamUrl)) throw new Error("Selected camera does not have an RTSP/HTTP stream URL.");
@@ -444,8 +452,11 @@ function enrichCameraStream(camera = {}) {
   const streamUrl = String(camera.streamUrl || "");
   const playable = isGatewayPlayable(streamUrl) && camera.gatewayEnabled !== false;
   const src = encodeURIComponent(alias);
+  const status = cameraStatusFromSource(camera);
   return {
     ...camera,
+    status,
+    health: status === "online" || status === "local-only" ? Number(camera.health || 0) : 0,
     streamAlias: alias,
     gatewayUrl: streamGatewayUrl,
     playable,
@@ -649,12 +660,13 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && path === "/api/cameras") {
     const body = await readBody(req);
     const cameraId = id("cam");
+    const streamUrl = String(body.streamUrl || "").trim();
     const alias = String(body.streamAlias || "").trim()
       || `cam-${String(body.name || cameraId).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
     const camera = await one(
       `INSERT INTO cameras (id, name, site_id, zone, stream_url, camera_role, stream_alias, gateway_enabled, stream_mode, status, fps, health, ai_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8, 'online', 20, 90, TRUE) RETURNING *`,
-      [cameraId, body.name, body.siteId || null, body.zone || "", body.streamUrl || "", body.cameraRole || "area", alias, body.streamMode || "hls"]
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8, $9, 20, 90, TRUE) RETURNING *`,
+      [cameraId, body.name, body.siteId || null, body.zone || "", streamUrl, body.cameraRole || "area", alias, body.streamMode || "hls", isGatewayPlayable(streamUrl) ? "online" : streamUrl.startsWith("local://") ? "local-only" : "offline"]
     );
     await audit("camera_created", camera.name);
     const streamSync = await syncGatewayStream(camera).catch((error) => ({ ok: false, message: error.message }));
@@ -664,22 +676,36 @@ async function handleApi(req, res, url) {
   if (req.method === "PATCH" && path.startsWith("/api/cameras/")) {
     const cameraId = decodeURIComponent(path.split("/").pop());
     const body = await readBody(req);
+    const nextStreamUrl = typeof body.streamUrl === "string" ? body.streamUrl.trim() : null;
     const camera = await one(
       `UPDATE cameras
-       SET zone = COALESCE($2, zone),
-           camera_role = COALESCE($3, camera_role),
-           min_face_size = COALESCE($4, min_face_size),
-           quality_threshold = COALESCE($5, quality_threshold),
-           detection_interval_ms = COALESCE($6, detection_interval_ms),
-           recognition_threshold = COALESCE($7, recognition_threshold),
-           retention_days = COALESCE($8, retention_days),
-           blur_untrusted = COALESCE($9, blur_untrusted),
+       SET name = COALESCE($2, name),
+           site_id = COALESCE($3, site_id),
+           zone = COALESCE($4, zone),
+           stream_url = COALESCE($5, stream_url),
+           stream_alias = COALESCE($6, stream_alias),
+           camera_role = COALESCE($7, camera_role),
+           min_face_size = COALESCE($8, min_face_size),
+           quality_threshold = COALESCE($9, quality_threshold),
+           detection_interval_ms = COALESCE($10, detection_interval_ms),
+           recognition_threshold = COALESCE($11, recognition_threshold),
+           retention_days = COALESCE($12, retention_days),
+           blur_untrusted = COALESCE($13, blur_untrusted),
+           status = CASE
+             WHEN COALESCE($5, stream_url) ~* '^(rtsp|rtsps|http|https)://' THEN 'online'
+             WHEN COALESCE($5, stream_url) LIKE 'local://%' THEN 'local-only'
+             ELSE 'offline'
+           END,
            updated_at = now()
        WHERE id = $1
        RETURNING *`,
       [
         cameraId,
+        body.name || null,
+        body.siteId || null,
         body.zone || null,
+        nextStreamUrl,
+        body.streamAlias || null,
         body.cameraRole || null,
         Number.isFinite(Number(body.minFaceSize)) ? Number(body.minFaceSize) : null,
         Number.isFinite(Number(body.qualityThreshold)) ? Number(body.qualityThreshold) : null,
@@ -691,7 +717,17 @@ async function handleApi(req, res, url) {
     );
     if (!camera) return sendJson(res, 404, { message: "Camera not found" });
     await audit("camera_tuning_updated", camera.name);
-    return sendJson(res, 200, { camera: enrichCameraStream(camera) });
+    const streamSync = await syncGatewayStream(camera).catch((error) => ({ ok: false, message: error.message }));
+    return sendJson(res, 200, { camera: enrichCameraStream(camera), streamSync });
+  }
+
+  if (req.method === "DELETE" && path.startsWith("/api/cameras/")) {
+    const cameraId = decodeURIComponent(path.split("/").pop());
+    const camera = await one("DELETE FROM cameras WHERE id = $1 RETURNING *", [cameraId]);
+    if (!camera) return sendJson(res, 404, { message: "Camera not found" });
+    await audit("camera_deleted", camera.name);
+    await syncAllGatewayStreams().catch(() => []);
+    return sendJson(res, 200, { cameraId, message: "Camera deleted" });
   }
 
   if (req.method === "GET" && path === "/api/privacy") {

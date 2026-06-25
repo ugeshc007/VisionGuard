@@ -36,6 +36,11 @@ button.ghost, nav button {
   color: var(--text);
   border: 1px solid var(--line);
 }
+button.danger-button {
+  background: rgba(255, 87, 87, .12);
+  color: #ffd5d5;
+  border: 1px solid rgba(255, 87, 87, .42);
+}
 input, select {
   width: 100%;
   border: 1px solid var(--line);
@@ -343,6 +348,9 @@ main { padding: 22px; display: grid; gap: 16px; }
 }
 .camera-tuning button,
 .camera-tuning .inline-check {
+  grid-column: 1 / -1;
+}
+.camera-tuning .full-row {
   grid-column: 1 / -1;
 }
 .inline-check {
