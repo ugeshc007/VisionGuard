@@ -848,12 +848,50 @@ async function handleApi(req, res, url) {
       const label = String(face.label || "").trim() || visitorCode(index);
       const quality = scoreFaceQualityDetailed(face, captureCamera || {});
       if (!quality.accepted) {
+        const embeddingResult = await buildFaceEmbedding(face, faceImage);
+        const reviewFace = await one(
+          `INSERT INTO detected_faces (
+             id, capture_id, camera_id, person_id, matched_person_id, label, category, status, confidence,
+             box, embedding, embedding_vector, embedding_model, embedding_dim, face_mime, face_image,
+             match_score, identity_result, quality_status, quality_score, track_id, cluster_id, face_area,
+             blur_score, save_reason, low_quality_reason
+           )
+           VALUES ($1, $2, $3, NULL, NULL, $4, $5, 'review', $6, $7::jsonb, $8::jsonb, $9::vector, $10, $11, $12, $13,
+                   0, 'pending', $14, $15, NULL, NULL, $16, $17, 'low-quality-review', $18)
+           RETURNING id, capture_id, camera_id, person_id, matched_person_id, label, category, status, confidence,
+                     box, embedding, embedding_vector, embedding_model, embedding_dim, face_mime, match_score,
+                     identity_result, quality_status, quality_score, track_id, cluster_id, face_area, blur_score,
+                     save_reason, low_quality_reason, created_at, updated_at`,
+          [
+            id("face"),
+            captureId,
+            body.cameraId || null,
+            label,
+            face.category || "visitor",
+            Number(face.confidence || 0),
+            JSON.stringify(face.box || {}),
+            JSON.stringify(embeddingResult.sourceEmbedding),
+            vectorLiteral(embeddingResult.vector),
+            embeddingResult.model,
+            embeddingResult.vector.length,
+            faceImage?.mime || "image/jpeg",
+            faceImage?.buffer || null,
+            quality.status,
+            quality.qualityScore,
+            quality.faceArea,
+            quality.blurScore,
+            quality.reason || ""
+          ]
+        );
         skippedFaces.push({
           label,
           reason: "low-quality-face",
           qualityScore: quality.qualityScore,
-          detail: quality.reason
+          detail: quality.reason,
+          savedForReview: true,
+          faceId: reviewFace.id
         });
+        savedFaces.push({ ...reviewFace, imageUrl: `/api/faces/${reviewFace.id}/image` });
         continue;
       }
       const embeddingResult = await buildFaceEmbedding(face, faceImage);
