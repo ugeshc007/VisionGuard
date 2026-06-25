@@ -1,0 +1,8 @@
+node_modules/
+.env
+*.log
+reports/*.txt
+face-service/__pycache__/
+tools/__pycache__/
+*.pyc
+data/

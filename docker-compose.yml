@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: visionguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: visionguard
+      POSTGRES_USER: visionguard
+      POSTGRES_PASSWORD: visionguard_dev_password
+    ports:
+      - "5438:5432"
+    volumes:
+      - visionguard_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U visionguard -d visionguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+    container_name: visionguard-web
+    restart: unless-stopped
+    environment:
+      PORT: 7070
+      DATABASE_URL: postgres://visionguard:visionguard_dev_password@postgres:5432/visionguard
+      FACE_EMBEDDING_PROVIDER: hybrid
+      FACE_EMBEDDING_URL: http://face-ai:8091/embed
+      STREAM_GATEWAY_URL: http://stream-gateway:1984
+      BUSINESS_TIMEZONE: Asia/Dubai
+    ports:
+      - "7070:7070"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      face-ai:
+        condition: service_started
+      stream-gateway:
+        condition: service_started
+    volumes:
+      - visionguard_reports:/app/reports
+    command: ["sh", "-c", "node tools/migrate-db.js && node server.js"]
+
+  worker:
+    build:
+      context: .
+    container_name: visionguard-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://visionguard:visionguard_dev_password@postgres:5432/visionguard
+      VISIONGUARD_API_BASE: http://web:7070
+      WORKER_INTERVAL_MS: 10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      web:
+        condition: service_started
+    command: ["node", "worker.js"]
+
+  face-ai:
+    build:
+      context: ./face-service
+    container_name: visionguard-face-ai
+    restart: unless-stopped
+    environment:
+      INSIGHTFACE_MODEL: buffalo_l
+    ports:
+      - "8091:8091"
+    volumes:
+      - visionguard_face_models:/models
+  stream-gateway:
+    image: alexxit/go2rtc:latest
+    container_name: visionguard-stream-gateway
+    restart: unless-stopped
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+    volumes:
+      - ./stream-gateway/go2rtc.yaml:/config/go2rtc.yaml:ro
+
+volumes:
+  visionguard_pgdata:
+  visionguard_face_models:
+  visionguard_reports:

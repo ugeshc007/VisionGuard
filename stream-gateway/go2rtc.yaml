@@ -1,0 +1,13 @@
+api:
+  listen: ":1984"
+
+webrtc:
+  listen: ":8555"
+
+rtsp:
+  listen: ":8554"
+
+log:
+  level: info
+
+streams: {}

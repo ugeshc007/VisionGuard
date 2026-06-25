@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+visionguard.out.log
+visionguard.err.log
+reports/*.txt
+.env
+.git
+.gitignore
+face-service/__pycache__
+tools/__pycache__
