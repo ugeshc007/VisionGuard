@@ -849,6 +849,19 @@ async function handleApi(req, res, url) {
       const quality = scoreFaceQualityDetailed(face, captureCamera || {});
       if (!quality.accepted) {
         const embeddingResult = await buildFaceEmbedding(face, faceImage);
+        const trainedMatch = await findBestVectorMatch(null, embeddingResult.vector);
+        const matched = isReliableFaceMatch(trainedMatch) ? trainedMatch : null;
+        const track = await getOrCreatePersonTrack({
+          camera: captureCamera,
+          matched,
+          embedding: embeddingResult.vector,
+          modelName: embeddingResult.model,
+          fallbackLabel: label,
+          qualityScore: quality.qualityScore
+        });
+        const reviewLabel = matched?.name || track?.visitorLabel || label;
+        const reviewCategory = matched?.category || track?.category || face.category || "visitor";
+        const reviewIdentity = matched ? identityResultForCategory(matched.category) : (track?.identityResult || "pending");
         const reviewFace = await one(
           `INSERT INTO detected_faces (
              id, capture_id, camera_id, person_id, matched_person_id, label, category, status, confidence,
@@ -856,8 +869,8 @@ async function handleApi(req, res, url) {
              match_score, identity_result, quality_status, quality_score, track_id, cluster_id, face_area,
              blur_score, save_reason, low_quality_reason
            )
-           VALUES ($1, $2, $3, NULL, NULL, $4, $5, 'review', $6, $7::jsonb, $8::jsonb, $9::vector, $10, $11, $12, $13,
-                   0, 'pending', $14, $15, NULL, NULL, $16, $17, 'low-quality-review', $18)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'review', $8, $9::jsonb, $10::jsonb, $11::vector, $12, $13, $14, $15,
+                   $16, $17, $18, $19, $20, $21, $22, $23, 'low-quality-review', $24)
            RETURNING id, capture_id, camera_id, person_id, matched_person_id, label, category, status, confidence,
                      box, embedding, embedding_vector, embedding_model, embedding_dim, face_mime, match_score,
                      identity_result, quality_status, quality_score, track_id, cluster_id, face_area, blur_score,
@@ -866,8 +879,10 @@ async function handleApi(req, res, url) {
             id("face"),
             captureId,
             body.cameraId || null,
-            label,
-            face.category || "visitor",
+            matched?.personId || null,
+            matched?.personId || null,
+            reviewLabel,
+            reviewCategory,
             Number(face.confidence || 0),
             JSON.stringify(face.box || {}),
             JSON.stringify(embeddingResult.sourceEmbedding),
@@ -876,8 +891,12 @@ async function handleApi(req, res, url) {
             embeddingResult.vector.length,
             faceImage?.mime || "image/jpeg",
             faceImage?.buffer || null,
+            matched?.score || track?.matchScore || 0,
+            reviewIdentity,
             quality.status,
             quality.qualityScore,
+            track?.id || null,
+            track?.clusterId || null,
             quality.faceArea,
             quality.blurScore,
             quality.reason || ""
@@ -891,6 +910,27 @@ async function handleApi(req, res, url) {
           savedForReview: true,
           faceId: reviewFace.id
         });
+        await recordAreaPresence({
+          cameraId: body.cameraId || null,
+          personId: matched?.personId || null,
+          visitorLabel: reviewFace.label,
+          category: reviewFace.category || "visitor"
+        });
+        await one(
+          `INSERT INTO identity_visits (id, face_id, person_id, camera_id, site_id, category, identity_result, event_id, match_score, note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9) RETURNING *`,
+          [
+            id("visit"),
+            reviewFace.id,
+            matched?.personId || null,
+            body.cameraId || null,
+            captureCamera?.siteId || null,
+            reviewFace.category || "visitor",
+            reviewIdentity,
+            matched?.score || track?.matchScore || 0,
+            matched ? `Recognized ${matched.name}; low-quality review: ${quality.reason || "needs camera tuning"}` : `Low quality review: ${quality.reason || "needs camera tuning"}`
+          ]
+        );
         savedFaces.push({ ...reviewFace, imageUrl: `/api/faces/${reviewFace.id}/image` });
         continue;
       }
@@ -1037,6 +1077,10 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && path === "/api/faces") {
     return sendJson(res, 200, { faces: await readDetectedFaces() });
+  }
+
+  if (req.method === "GET" && path === "/api/face-days") {
+    return sendJson(res, 200, { days: await readFaceDays() });
   }
 
   if (req.method === "GET" && path === "/api/person-tracks") {
@@ -1342,6 +1386,95 @@ async function readDetectedFaces(limit = 100) {
     LIMIT $1
   `, [limit]);
   return faces.map((face) => ({ ...face, imageUrl: `/api/faces/${face.id}/image` }));
+}
+
+async function readFaceDays(limit = 14) {
+  const dwell = await rows(`
+    WITH best_faces AS (
+      SELECT DISTINCT ON (COALESCE(f.person_id, f.matched_person_id, f.label))
+        COALESCE(f.person_id, f.matched_person_id, f.label) AS identity_key,
+        f.id AS face_id,
+        COALESCE(p.name, mp.name, f.label) AS display_name
+      FROM detected_faces f
+      LEFT JOIN people p ON p.id = f.person_id
+      LEFT JOIN people mp ON mp.id = f.matched_person_id
+      WHERE f.face_image IS NOT NULL
+      ORDER BY COALESCE(f.person_id, f.matched_person_id, f.label),
+               COALESCE(f.quality_score, 0) DESC,
+               f.created_at DESC
+    )
+    SELECT
+      (d.first_seen AT TIME ZONE $2)::date AS day,
+      COALESCE(d.person_id, d.visitor_label) AS identity_key,
+      d.person_id,
+      d.visitor_label,
+      COALESCE(p.name, bf.display_name, d.visitor_label) AS display_name,
+      d.category,
+      d.area_name,
+      d.camera_id,
+      cam.name AS camera_name,
+      min(d.first_seen) AS first_seen,
+      max(d.last_seen) AS last_seen,
+      sum(d.detection_count)::integer AS detection_count,
+      sum(GREATEST(EXTRACT(EPOCH FROM (d.last_seen - d.first_seen))::integer, d.detection_count * 5))::integer AS seconds_spent,
+      max(bf.face_id) AS face_id
+    FROM area_dwell_sessions d
+    LEFT JOIN people p ON p.id = d.person_id
+    LEFT JOIN best_faces bf ON bf.identity_key = COALESCE(d.person_id, d.visitor_label)
+    LEFT JOIN cameras cam ON cam.id = d.camera_id
+    WHERE (d.first_seen AT TIME ZONE $2)::date >= (now() AT TIME ZONE $2)::date - ($1::text || ' days')::interval
+    GROUP BY (d.first_seen AT TIME ZONE $2)::date, COALESCE(d.person_id, d.visitor_label), d.person_id, d.visitor_label,
+             COALESCE(p.name, bf.display_name, d.visitor_label), d.category, d.area_name, d.camera_id, cam.name
+    ORDER BY day DESC, first_seen ASC
+  `, [String(limit), businessTimezone]);
+  const byDay = new Map();
+  for (const row of dwell) {
+    const day = row.day instanceof Date ? row.day.toISOString().slice(0, 10) : String(row.day).slice(0, 10);
+    if (!byDay.has(day)) byDay.set(day, { date: day, people: [] });
+    const dayEntry = byDay.get(day);
+    let person = dayEntry.people.find((item) => item.identityKey === row.identityKey);
+    if (!person) {
+      person = {
+        identityKey: row.identityKey,
+        personId: row.personId,
+        visitorLabel: row.visitorLabel,
+        displayName: row.displayName,
+        category: row.category,
+        firstSeen: row.firstSeen,
+        lastSeen: row.lastSeen,
+        detectionCount: 0,
+        totalSeconds: 0,
+        imageUrl: row.faceId ? `/api/faces/${row.faceId}/image` : "",
+        areas: []
+      };
+      dayEntry.people.push(person);
+    }
+    person.firstSeen = new Date(row.firstSeen) < new Date(person.firstSeen) ? row.firstSeen : person.firstSeen;
+    person.lastSeen = new Date(row.lastSeen) > new Date(person.lastSeen) ? row.lastSeen : person.lastSeen;
+    person.detectionCount += Number(row.detectionCount || 0);
+    person.totalSeconds += Number(row.secondsSpent || 0);
+    person.areas.push({
+      areaName: row.areaName || row.cameraName || "Unassigned area",
+      cameraName: row.cameraName,
+      cameraId: row.cameraId,
+      firstSeen: row.firstSeen,
+      lastSeen: row.lastSeen,
+      detectionCount: Number(row.detectionCount || 0),
+      secondsSpent: Number(row.secondsSpent || 0)
+    });
+  }
+  return [...byDay.values()].map((day) => {
+    day.people.forEach((person) => {
+      person.areaCount = new Set(person.areas.map((area) => area.areaName)).size;
+      person.areas.sort((a, b) => Number(b.secondsSpent || 0) - Number(a.secondsSpent || 0));
+    });
+    day.people.sort((a, b) => Number(b.totalSeconds || 0) - Number(a.totalSeconds || 0));
+    day.peopleCount = day.people.length;
+    day.areaCount = new Set(day.people.flatMap((person) => person.areas.map((area) => area.areaName))).size;
+    day.detectionCount = day.people.reduce((total, person) => total + Number(person.detectionCount || 0), 0);
+    day.totalSeconds = day.people.reduce((total, person) => total + Number(person.totalSeconds || 0), 0);
+    return day;
+  });
 }
 
 async function readIdentityVisits(limit = 100) {

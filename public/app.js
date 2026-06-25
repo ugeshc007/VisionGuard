@@ -8,13 +8,17 @@ const state = {
   vehicles: [],
   attendance: [],
   faces: [],
+  faceDays: [],
+  activeFaceDay: "",
   visits: [],
   tracks: [],
   privacy: null,
   localStream: null,
   autoCaptureTimer: null,
   autoCaptureBusy: false,
+  autoCaptureMode: "selected",
   activeCaptureCameraId: "",
+  activeCaptureCameraIds: [],
   captureSessionStats: { attempts: 0, saved: 0, skipped: 0 },
   trackingFrame: null,
   blazeFaceModel: null,
@@ -42,6 +46,7 @@ const els = {
   peopleGrid: $("#peopleGrid"),
   ruleGrid: $("#ruleGrid"),
   faceTrainingGrid: $("#faceTrainingGrid"),
+  faceDaySummary: $("#faceDaySummary"),
   analyticsGrid: $("#analyticsGrid"),
   attendanceTable: $("#attendanceTable"),
   vehicleTable: $("#vehicleTable"),
@@ -59,6 +64,7 @@ const els = {
   localCameraCanvas: $("#localCameraCanvas"),
   faceDetectorStatus: $("#faceDetectorStatus"),
   startLocalCameraButton: $("#startLocalCameraButton"),
+  startAllCamerasButton: $("#startAllCamerasButton"),
   autoCaptureButton: $("#autoCaptureButton"),
   runFaceRetentionButton: $("#runFaceRetentionButton"),
   cameraViewer: $("#cameraViewer"),
@@ -380,12 +386,20 @@ function eventCard(event) {
 async function loadFaces() {
   const data = await api("/api/faces");
   state.faces = data.faces || [];
+  const history = await api("/api/face-days");
+  state.faceDays = history.days || [];
+  state.activeFaceDay = state.activeFaceDay || state.faceDays[0]?.date || "";
   renderFaceTrainingGrid();
   renderForensicFaceGallery();
 }
 
 function renderFaceTrainingGrid() {
   if (!els.faceTrainingGrid) return;
+  renderFaceDaySummary();
+  if (state.faceTab === "history") {
+    renderFaceHistory();
+    return;
+  }
   const faces = state.faceTab === "enrolled"
     ? state.faces.filter((face) => face.status === "trained" || face.personId || face.matchedPersonId)
     : state.faces.filter((face) => !(face.status === "trained" || face.personId || face.matchedPersonId));
@@ -431,6 +445,52 @@ function renderFaceTrainingGrid() {
       </form>
     </article>
   `).join("");
+}
+
+function renderFaceDaySummary() {
+  if (!els.faceDaySummary) return;
+  if (state.faceTab !== "history") {
+    els.faceDaySummary.innerHTML = "";
+    return;
+  }
+  els.faceDaySummary.innerHTML = state.faceDays.length ? `
+    <div class="day-card-grid">
+      ${state.faceDays.map((day) => `
+        <button type="button" class="day-card ${state.activeFaceDay === day.date ? "active" : ""}" data-face-day="${escapeHtml(day.date)}">
+          <strong>${escapeHtml(formatDisplayDate(day.date))}</strong>
+          <small>${Number(day.peopleCount || 0)} people | ${Number(day.areaCount || 0)} area(s)</small>
+          <small>${Number(day.detectionCount || 0)} detections | ${formatDuration(day.totalSeconds || 0)}</small>
+        </button>
+      `).join("")}
+    </div>
+  ` : `<div class="empty-state">No daily face history yet. Start all cameras to build daily movement records.</div>`;
+}
+
+function renderFaceHistory() {
+  const selectedDay = state.faceDays.find((day) => day.date === state.activeFaceDay) || state.faceDays[0];
+  if (!selectedDay) {
+    els.faceTrainingGrid.innerHTML = `<div class="empty-state">No daily history to show yet.</div>`;
+    return;
+  }
+  els.faceTrainingGrid.innerHTML = selectedDay.people.length ? selectedDay.people.map((person) => `
+    <article class="face-card person-day-card">
+      <img src="${escapeHtml(person.imageUrl || "")}" alt="${escapeHtml(person.displayName || "Person")}" />
+      <div>
+        <strong>${escapeHtml(person.displayName || person.visitorLabel || "Unknown visitor")}</strong>
+        <small>${escapeHtml(person.category || "visitor")} | ${Number(person.areaCount || 0)} area(s) | ${Number(person.detectionCount || 0)} detection(s)</small>
+        <small>First seen: ${new Date(person.firstSeen).toLocaleString()} | Last seen: ${new Date(person.lastSeen).toLocaleString()}</small>
+        <small>Total stay: ${formatDuration(person.totalSeconds || 0)}</small>
+        <div class="mini-chip-row">
+          ${(person.areas || []).map((area) => `<span class="mini-chip">${escapeHtml(area.areaName)} - ${formatDuration(area.secondsSpent || 0)} (${Number(area.detectionCount || 0)})</span>`).join("")}
+        </div>
+      </div>
+    </article>
+  `).join("") : `<div class="empty-state">No people tracked on ${escapeHtml(formatDisplayDate(selectedDay.date))}.</div>`;
+}
+
+function formatDisplayDate(value = "") {
+  const [year, month, day] = String(value).split("-");
+  return year && month && day ? `${day}-${month}-${year}` : value;
 }
 
 function formatConfidence(score) {
@@ -701,6 +761,7 @@ function bindActions() {
   $("#simulateFromAlerts").addEventListener("click", simulateEvent);
   $("#addLocalCameraButton").addEventListener("click", addLocalCamera);
   $("#startLocalCameraButton").addEventListener("click", startSelectedCamera);
+  $("#startAllCamerasButton").addEventListener("click", startAllCameras);
   $("#captureFacesButton").addEventListener("click", () => captureFacesToDb());
   $("#autoCaptureButton").addEventListener("click", toggleAutoCapture);
   $("#processFacesButton").addEventListener("click", processPendingFaces);
@@ -727,7 +788,7 @@ function bindActions() {
     });
   });
   els.localCameraSelect?.addEventListener("change", () => {
-    if (state.autoCaptureTimer) {
+    if (state.autoCaptureTimer && state.autoCaptureMode === "selected") {
       stopAutoCapture("Camera selection changed. Detection stopped.");
     }
   });
@@ -752,6 +813,12 @@ function bindActions() {
       toast("Detected face image deleted.");
       await loadFaces();
       await loadAll();
+      return;
+    }
+    const faceDayButton = event.target.closest("[data-face-day]");
+    if (faceDayButton) {
+      state.activeFaceDay = faceDayButton.dataset.faceDay;
+      renderFaceTrainingGrid();
       return;
     }
     const deleteCameraButton = event.target.closest("[data-delete-camera]");
@@ -921,10 +988,59 @@ async function startSelectedCamera() {
     return;
   }
   if (state.autoCaptureTimer) {
-    els.faceDetectorStatus.textContent = `Detection is already running for ${selectedCamera.name}. Use Stop detection to stop it.`;
+    els.faceDetectorStatus.textContent = `Detection is already running. Use Stop detection before starting another mode.`;
     return;
   }
   await toggleAutoCapture();
+}
+
+async function startAllCameras() {
+  if (state.autoCaptureTimer) {
+    els.faceDetectorStatus.textContent = "Detection is already running. Use Stop detection before starting all cameras.";
+    return;
+  }
+  const cameras = state.cameras.filter((camera) => {
+    const status = String(camera.status || "").toLowerCase();
+    return status !== "disabled" && isRemoteFrameCamera(camera) && !isBrowserLocalCamera(camera);
+  });
+  if (!cameras.length) {
+    els.faceDetectorStatus.textContent = "No active RTSP/HTTP cameras found. Add camera stream URLs first.";
+    toast("No active RTSP/HTTP cameras to start.");
+    return;
+  }
+  state.autoCaptureMode = "all";
+  state.activeCaptureCameraIds = cameras.map((camera) => camera.id);
+  state.activeCaptureCameraId = "";
+  state.captureSessionStats = { attempts: 0, saved: 0, skipped: 0 };
+  els.autoCaptureButton.textContent = "Stop detection";
+  els.startLocalCameraButton.textContent = "Selected disabled";
+  els.startAllCamerasButton.textContent = "All cameras running";
+  updateCaptureSessionStatus(null, `starting ${cameras.length} camera(s)`);
+  const runAllCaptureRound = async () => {
+    if (state.autoCaptureBusy) return;
+    state.autoCaptureBusy = true;
+    try {
+      const activeCameras = state.activeCaptureCameraIds
+        .map((cameraId) => state.cameras.find((camera) => camera.id === cameraId))
+        .filter(Boolean);
+      let roundDetected = 0;
+      for (const camera of activeCameras) {
+        const result = await captureFacesToDb({ camera, skipClientDuplicateFilter: true, silent: true });
+        state.captureSessionStats.attempts += 1;
+        state.captureSessionStats.saved += Number(result?.saved || 0);
+        state.captureSessionStats.skipped += Number(result?.skipped || 0);
+        roundDetected += Number(result?.detected || 0);
+      }
+      updateCaptureSessionStatus(null, `${activeCameras.length} camera(s), ${roundDetected} face(s) this round`);
+    } catch (error) {
+      els.faceDetectorStatus.textContent = error.message;
+    } finally {
+      state.autoCaptureBusy = false;
+    }
+  };
+  await runAllCaptureRound();
+  const interval = Math.max(5000, Math.min(15000, Number(cameras[0]?.detectionIntervalMs || 650) * cameras.length));
+  state.autoCaptureTimer = setInterval(runAllCaptureRound, interval);
 }
 
 async function captureFacesToDb(options = {}) {
@@ -1050,16 +1166,22 @@ function summarizeSkippedFaces(skippedFaces = []) {
 function updateCaptureSessionStatus(camera, latest = "") {
   const stats = state.captureSessionStats;
   const last = latest ? ` Last: ${latest}` : "";
-  els.faceDetectorStatus.textContent = `Detection running for ${camera?.name || "selected camera"} | attempts ${stats.attempts} | saved ${stats.saved} | skipped ${stats.skipped}.${last}`;
+  const target = state.autoCaptureMode === "all"
+    ? `${state.activeCaptureCameraIds.length} camera(s)`
+    : (camera?.name || "selected camera");
+  els.faceDetectorStatus.textContent = `Detection running for ${target} | attempts ${stats.attempts} | saved ${stats.saved} | skipped ${stats.skipped}.${last}`;
 }
 
 function stopAutoCapture(message = "AI auto capture stopped.") {
   if (state.autoCaptureTimer) clearInterval(state.autoCaptureTimer);
   state.autoCaptureTimer = null;
   state.autoCaptureBusy = false;
+  state.autoCaptureMode = "selected";
   state.activeCaptureCameraId = "";
+  state.activeCaptureCameraIds = [];
   els.autoCaptureButton.textContent = "Start AI auto capture";
   els.startLocalCameraButton.textContent = "Start selected camera";
+  els.startAllCamerasButton.textContent = "Start all cameras";
   els.faceDetectorStatus.textContent = message;
 }
 
@@ -1077,10 +1199,13 @@ async function toggleAutoCapture() {
     const started = await startLocalCamera();
     if (!started) return;
   }
+  state.autoCaptureMode = "selected";
   state.activeCaptureCameraId = selectedCamera.id;
+  state.activeCaptureCameraIds = [selectedCamera.id];
   state.captureSessionStats = { attempts: 0, saved: 0, skipped: 0 };
   els.autoCaptureButton.textContent = "Stop detection";
   els.startLocalCameraButton.textContent = "Detection running";
+  els.startAllCamerasButton.textContent = "Start all cameras";
   updateCaptureSessionStatus(selectedCamera, "starting");
   const runCaptureTick = async () => {
     if (state.autoCaptureBusy) return;

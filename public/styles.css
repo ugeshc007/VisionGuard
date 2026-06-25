@@ -387,6 +387,40 @@ main { padding: 22px; display: grid; gap: 16px; }
   gap: 8px;
 }
 .face-card small b { color: var(--cyan); }
+.day-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.day-card {
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  min-height: 86px;
+  border-color: rgba(55, 231, 212, .24);
+}
+.day-card.active {
+  background: linear-gradient(135deg, rgba(55, 231, 212, .22), rgba(255, 209, 102, .2));
+  border-color: rgba(255, 209, 102, .72);
+}
+.person-day-card > div {
+  display: grid;
+  gap: 7px;
+}
+.mini-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mini-chip {
+  border: 1px solid rgba(55, 231, 212, .22);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  font-size: .78rem;
+}
 .empty-state {
   padding: 18px;
   border: 1px dashed rgba(255,255,255,.22);
@@ -602,7 +636,7 @@ main { padding: 22px; display: grid; gap: 16px; }
   .sidebar { position: static; height: auto; }
   nav { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .hero, .two-col { grid-template-columns: 1fr; }
-  .kpi-grid, .form-grid, .camera-grid, .people-grid, .rule-grid, .analytics-grid, .face-grid, .flow-grid, .local-camera-layout, .pipeline-grid { grid-template-columns: 1fr; }
+  .kpi-grid, .form-grid, .camera-grid, .people-grid, .rule-grid, .analytics-grid, .face-grid, .flow-grid, .local-camera-layout, .pipeline-grid, .day-card-grid { grid-template-columns: 1fr; }
   .camera-tuning { grid-template-columns: 1fr; }
   .forensic-face-box, .face-gallery, .compact-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -103,9 +103,10 @@
               <div class="local-camera-controls">
                 <label>Capture camera source<select id="localCameraSelect"></select></label>
                 <button id="startLocalCameraButton" type="button">Start selected camera</button>
+                <button id="startAllCamerasButton" type="button">Start all cameras</button>
                 <button id="captureFacesButton" type="button">Detect faces & save capture</button>
                 <button id="autoCaptureButton" type="button" class="ghost">Start AI auto capture</button>
-                <p id="faceDetectorStatus">Select a camera, then start detection. RTSP cameras save detected face snapshots to Current detections.</p>
+                <p id="faceDetectorStatus">Start one selected camera for debugging, or start all cameras for CCTV tracking across areas.</p>
               </div>
             </div>
           </section>
@@ -206,7 +207,9 @@
             <div class="tab-row" role="tablist" aria-label="Face enrollment tabs">
               <button type="button" class="tab-button active" data-face-tab="current">Current detections</button>
               <button type="button" class="tab-button" data-face-tab="enrolled">Enrolled faces</button>
+              <button type="button" class="tab-button" data-face-tab="history">Daily history</button>
             </div>
+            <div id="faceDaySummary"></div>
             <div class="face-grid" id="faceTrainingGrid"></div>
           </section>
         </section>
