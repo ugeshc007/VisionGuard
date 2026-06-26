@@ -26,6 +26,7 @@ const state = {
   liveFaces: [],
   faceTab: "current",
   cameraWallSize: 4,
+  faceImageZoom: 1,
   lastTrackedBoxes: [],
   visitorSerial: 0,
   trackingBusy: false,
@@ -35,6 +36,7 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const CAPTURE_RESUME_KEY = "visionguard.captureSession";
 
 const els = {
   kpiGrid: $("#kpiGrid"),
@@ -72,6 +74,13 @@ const els = {
   cameraViewerFeed: $("#cameraViewerFeed"),
   cameraViewerMeta: $("#cameraViewerMeta"),
   closeCameraViewer: $("#closeCameraViewer"),
+  faceImageViewer: $("#faceImageViewer"),
+  faceImageViewerTitle: $("#faceImageViewerTitle"),
+  faceImageViewerImg: $("#faceImageViewerImg"),
+  closeFaceImageViewer: $("#closeFaceImageViewer"),
+  zoomFaceImageIn: $("#zoomFaceImageIn"),
+  zoomFaceImageOut: $("#zoomFaceImageOut"),
+  resetFaceImageZoom: $("#resetFaceImageZoom"),
   streamGatewayStatus: $("#streamGatewayStatus"),
   toast: $("#toast")
 };
@@ -146,6 +155,11 @@ async function loadAll() {
   renderManagementViews();
   await loadFaces();
   await renderReports();
+}
+
+async function loadAllAndResumeCapture() {
+  await loadAll();
+  await resumeCaptureSession();
 }
 
 function renderDashboard() {
@@ -400,18 +414,18 @@ function renderFaceTrainingGrid() {
     renderFaceHistory();
     return;
   }
-  const faces = state.faceTab === "enrolled"
-    ? state.faces.filter((face) => face.status === "trained" || face.personId || face.matchedPersonId)
-    : state.faces.filter((face) => !(face.status === "trained" || face.personId || face.matchedPersonId));
+  if (state.faceTab === "enrolled") {
+    renderEnrolledFaceGrid();
+    return;
+  }
+  const faces = state.faces.filter((face) => !(face.status === "trained" || face.personId || face.matchedPersonId));
   if (!faces.length) {
-    els.faceTrainingGrid.innerHTML = state.faceTab === "enrolled"
-      ? `<div class="empty-state">No enrolled faces yet. Train a detected face with a staff/customer name and it will appear here.</div>`
-      : `<div class="empty-state">No current detections. Start the laptop camera, capture faces, then classify them here.</div>`;
+    els.faceTrainingGrid.innerHTML = `<div class="empty-state">No current detections. Start the laptop camera, capture faces, then classify them here.</div>`;
     return;
   }
   els.faceTrainingGrid.innerHTML = faces.map((face) => `
     <article class="face-card">
-      <img src="${face.imageUrl}" alt="Detected face ${escapeHtml(face.id)}" />
+      ${faceImageButton(face, `Detected face ${escapeHtml(face.id)}`)}
       <form data-face-form="${face.id}">
         <strong>${escapeHtml(face.matchedPersonName || face.personName || face.label || "Untrained face")}</strong>
         <small>${escapeHtml(face.cameraName || "Local camera")} | ${new Date(face.createdAt).toLocaleString()}</small>
@@ -447,6 +461,77 @@ function renderFaceTrainingGrid() {
   `).join("");
 }
 
+function renderEnrolledFaceGrid() {
+  const trainedFaces = state.faces.filter((face) => face.status === "trained" || face.personId || face.matchedPersonId);
+  const cards = [];
+  const usedFaceIds = new Set();
+  state.people.forEach((person) => {
+    const face = trainedFaces.find((item) => item.personId === person.id || item.matchedPersonId === person.id);
+    if (face) usedFaceIds.add(face.id);
+    cards.push(`
+      <article class="face-card enrolled-identity-card">
+        ${face ? faceImageButton(face, `${escapeHtml(person.name)} enrolled face`) : `<div class="face-placeholder">${escapeHtml(initials(person.name))}</div>`}
+        <div class="enrolled-identity-body">
+          <strong>${escapeHtml(person.name)}</strong>
+          <small>${escapeHtml(person.category || "person")} | ${escapeHtml(person.department || "No department")} | ${escapeHtml(person.accessLevel || "standard")}</small>
+          <small>Face status: <b>${escapeHtml(person.faceStatus || "enrolled")}</b> | Person record kept permanently</small>
+          <small>Last seen: ${person.lastSeen ? new Date(person.lastSeen).toLocaleString() : "Not seen yet"}</small>
+          ${face ? `<small>Reference image: ${escapeHtml(face.id)} | Quality ${Number(face.qualityScore || 0)}%</small>` : `<small>No reference image currently attached. Existing staff record is still saved.</small>`}
+        </div>
+      </article>
+    `);
+  });
+  trainedFaces
+    .filter((face) => !usedFaceIds.has(face.id))
+    .forEach((face) => {
+      cards.push(`
+        <article class="face-card">
+          ${faceImageButton(face, `${escapeHtml(displayFaceName(face))} enrolled face`)}
+          <form data-face-form="${face.id}">
+            <strong>${escapeHtml(displayFaceName(face))}</strong>
+            <small>${escapeHtml(face.cameraName || "Camera")} | ${new Date(face.createdAt).toLocaleString()}</small>
+            <small>Identity: <b>${escapeHtml(face.identityResult || "known")}</b> | Quality: ${escapeHtml(face.qualityStatus || "usable")} ${Number(face.qualityScore || 0)}%</small>
+            <label>Person / staff name
+              <input name="label" value="${escapeHtml(displayFaceName(face))}" />
+            </label>
+            <select name="category">
+              ${["visitor", "customer", "staff", "employee", "unknown", "watchlist"].map((category) => `<option ${face.category === category ? "selected" : ""}>${category}</option>`).join("")}
+            </select>
+            <select name="status">
+              ${["untrained", "trained", "review", "blocked"].map((status) => `<option ${face.status === status ? "selected" : ""}>${status}</option>`).join("")}
+            </select>
+            <div class="face-actions">
+              <button>Save training label</button>
+              <button type="button" class="danger" data-delete-face="${face.id}">Delete detected image</button>
+            </div>
+          </form>
+        </article>
+      `);
+    });
+  els.faceTrainingGrid.innerHTML = cards.length
+    ? cards.join("")
+    : `<div class="empty-state">No enrolled faces yet. Train a detected face with a staff/customer name and it will appear here.</div>`;
+}
+
+function faceImageButton(face = {}, alt = "Detected face") {
+  if (!face.imageUrl) return `<div class="face-placeholder">?</div>`;
+  return `
+    <button type="button" class="face-thumb-button" data-preview-image="${escapeHtml(face.imageUrl)}" data-preview-title="${escapeHtml(displayFaceName(face))}">
+      <img src="${escapeHtml(face.imageUrl)}" alt="${alt}" />
+      <span>View</span>
+    </button>
+  `;
+}
+
+function initials(name = "") {
+  return String(name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "?";
+}
+
 function renderFaceDaySummary() {
   if (!els.faceDaySummary) return;
   if (state.faceTab !== "history") {
@@ -474,7 +559,7 @@ function renderFaceHistory() {
   }
   els.faceTrainingGrid.innerHTML = selectedDay.people.length ? selectedDay.people.map((person) => `
     <article class="face-card person-day-card">
-      <img src="${escapeHtml(person.imageUrl || "")}" alt="${escapeHtml(person.displayName || "Person")}" />
+      ${person.imageUrl ? faceImageButton({ imageUrl: person.imageUrl, label: person.displayName }, `${escapeHtml(person.displayName || "Person")} daily reference`) : `<div class="face-placeholder">?</div>`}
       <div>
         <strong>${escapeHtml(person.displayName || person.visitorLabel || "Unknown visitor")}</strong>
         <small>${escapeHtml(person.category || "visitor")} | ${Number(person.areaCount || 0)} area(s) | ${Number(person.detectionCount || 0)} detection(s)</small>
@@ -780,6 +865,16 @@ function bindActions() {
   els.cameraViewer?.addEventListener("click", (event) => {
     if (event.target === els.cameraViewer) closeCameraViewer();
   });
+  els.closeFaceImageViewer?.addEventListener("click", closeFaceImageViewer);
+  els.faceImageViewer?.addEventListener("click", (event) => {
+    if (event.target === els.faceImageViewer) closeFaceImageViewer();
+  });
+  els.zoomFaceImageIn?.addEventListener("click", () => setFaceImageZoom(state.faceImageZoom + 0.25));
+  els.zoomFaceImageOut?.addEventListener("click", () => setFaceImageZoom(state.faceImageZoom - 0.25));
+  els.resetFaceImageZoom?.addEventListener("click", () => setFaceImageZoom(1));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeFaceImageViewer();
+  });
   $$("[data-face-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.faceTab = button.dataset.faceTab;
@@ -793,6 +888,11 @@ function bindActions() {
     }
   });
   document.addEventListener("click", async (event) => {
+    const previewImageButton = event.target.closest("[data-preview-image]");
+    if (previewImageButton) {
+      openFaceImageViewer(previewImageButton.dataset.previewImage, previewImageButton.dataset.previewTitle || "Detected face");
+      return;
+    }
     const openCameraButton = event.target.closest("[data-open-camera]");
     if (openCameraButton) {
       openCameraViewer(openCameraButton.dataset.openCamera);
@@ -908,6 +1008,29 @@ function closeCameraViewer() {
   els.cameraViewer?.setAttribute("aria-hidden", "true");
 }
 
+function openFaceImageViewer(src, title = "Detected face") {
+  if (!els.faceImageViewer || !els.faceImageViewerImg || !src) return;
+  els.faceImageViewerTitle.textContent = title || "Detected face";
+  els.faceImageViewerImg.src = src;
+  state.faceImageZoom = 1;
+  setFaceImageZoom(1);
+  els.faceImageViewer.classList.add("open");
+  els.faceImageViewer.setAttribute("aria-hidden", "false");
+}
+
+function closeFaceImageViewer() {
+  if (!els.faceImageViewer) return;
+  els.faceImageViewer.classList.remove("open");
+  els.faceImageViewer.setAttribute("aria-hidden", "true");
+}
+
+function setFaceImageZoom(value) {
+  state.faceImageZoom = Math.max(0.5, Math.min(4, Number(value || 1)));
+  if (els.faceImageViewerImg) {
+    els.faceImageViewerImg.style.transform = `scale(${state.faceImageZoom})`;
+  }
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1011,6 +1134,7 @@ async function startAllCameras() {
   state.autoCaptureMode = "all";
   state.activeCaptureCameraIds = cameras.map((camera) => camera.id);
   state.activeCaptureCameraId = "";
+  saveCaptureSession("all", state.activeCaptureCameraIds);
   state.captureSessionStats = { attempts: 0, saved: 0, skipped: 0 };
   els.autoCaptureButton.textContent = "Stop detection";
   els.startLocalCameraButton.textContent = "Selected disabled";
@@ -1172,8 +1296,62 @@ function updateCaptureSessionStatus(camera, latest = "") {
   els.faceDetectorStatus.textContent = `Detection running for ${target} | attempts ${stats.attempts} | saved ${stats.saved} | skipped ${stats.skipped}.${last}`;
 }
 
+function saveCaptureSession(mode, cameraIds = []) {
+  try {
+    localStorage.setItem(CAPTURE_RESUME_KEY, JSON.stringify({
+      active: true,
+      mode,
+      cameraIds,
+      updatedAt: new Date().toISOString()
+    }));
+  } catch {
+    // Browser storage can be disabled; capture still works for the current page session.
+  }
+}
+
+function clearCaptureSession() {
+  try {
+    localStorage.removeItem(CAPTURE_RESUME_KEY);
+  } catch {
+    // Ignore storage cleanup errors.
+  }
+}
+
+async function resumeCaptureSession() {
+  if (state.autoCaptureTimer) return;
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(CAPTURE_RESUME_KEY) || "null");
+  } catch {
+    saved = null;
+  }
+  if (!saved?.active) return;
+  const cameraIds = Array.isArray(saved.cameraIds) ? saved.cameraIds : [];
+  if (saved.mode === "all") {
+    const available = state.cameras.filter((camera) => cameraIds.includes(camera.id) && isRemoteFrameCamera(camera) && !isBrowserLocalCamera(camera));
+    if (!available.length) {
+      clearCaptureSession();
+      els.faceDetectorStatus.textContent = "Saved AI capture session could not resume because no matching RTSP/HTTP camera is available.";
+      return;
+    }
+    els.faceDetectorStatus.textContent = "Resuming all-camera AI capture after refresh...";
+    await startAllCameras();
+    return;
+  }
+  const cameraId = cameraIds[0];
+  if (cameraId && els.localCameraSelect) els.localCameraSelect.value = cameraId;
+  const camera = selectedCaptureCamera();
+  if (!camera) {
+    clearCaptureSession();
+    return;
+  }
+  els.faceDetectorStatus.textContent = "Resuming selected-camera AI capture after refresh...";
+  await toggleAutoCapture();
+}
+
 function stopAutoCapture(message = "AI auto capture stopped.") {
   if (state.autoCaptureTimer) clearInterval(state.autoCaptureTimer);
+  clearCaptureSession();
   state.autoCaptureTimer = null;
   state.autoCaptureBusy = false;
   state.autoCaptureMode = "selected";
@@ -1202,6 +1380,7 @@ async function toggleAutoCapture() {
   state.autoCaptureMode = "selected";
   state.activeCaptureCameraId = selectedCamera.id;
   state.activeCaptureCameraIds = [selectedCamera.id];
+  saveCaptureSession("selected", state.activeCaptureCameraIds);
   state.captureSessionStats = { attempts: 0, saved: 0, skipped: 0 };
   els.autoCaptureButton.textContent = "Stop detection";
   els.startLocalCameraButton.textContent = "Detection running";
@@ -1638,4 +1817,4 @@ function estimateSharpness(context, width, height) {
 bindNavigation();
 bindForms();
 bindActions();
-loadAll().catch((error) => toast(error.message));
+loadAllAndResumeCapture().catch((error) => toast(error.message));

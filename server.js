@@ -1362,6 +1362,8 @@ async function readDetectedFaces(limit = 100) {
              row_number() OVER (
                PARTITION BY COALESCE(f.person_id, f.matched_person_id, f.label)
                ORDER BY
+                 CASE WHEN f.status = 'trained' THEN 1 ELSE 0 END DESC,
+                 CASE WHEN f.person_id IS NOT NULL OR f.matched_person_id IS NOT NULL THEN 1 ELSE 0 END DESC,
                  CASE WHEN f.face_image IS NOT NULL THEN 1 ELSE 0 END DESC,
                  COALESCE(f.quality_score, 0) DESC,
                  COALESCE(f.confidence, 0) DESC,
@@ -1950,11 +1952,13 @@ async function runDailyFaceRetention(targetDate = yesterday()) {
   const kept = [];
   for (const cluster of clusters) {
     const sorted = [...cluster.faces].sort((a, b) => faceRetentionScore(b) - faceRetentionScore(a));
-    const best = sorted[0];
+    const trainedFaces = sorted.filter((face) => face.status === "trained");
+    const best = trainedFaces[0] || sorted[0];
     if (!best) continue;
     kept.push(best);
-    const duplicates = sorted.slice(1);
+    const duplicates = sorted.filter((face) => face.id !== best.id);
     for (const duplicate of duplicates) {
+      if (duplicate.status === "trained") continue;
       await relinkFaceReferences(duplicate, best, safeDate);
       await pool.query("DELETE FROM detected_faces WHERE id = $1", [duplicate.id]);
       deletedFaces += 1;
@@ -1986,8 +1990,14 @@ async function applyPrivacyRetention() {
         low_quality_reason = COALESCE(NULLIF(low_quality_reason, ''), 'Face image cleared by privacy retention policy'),
         updated_at = now()
     WHERE face_image IS NOT NULL
+      AND status <> 'trained'
+      AND id NOT IN (
+        SELECT best_face_id
+        FROM person_tracks
+        WHERE best_face_id IS NOT NULL
+      )
       AND (
-        (status <> 'trained' AND created_at < now() - ($1::text || ' days')::interval)
+        created_at < now() - ($1::text || ' days')::interval
         OR created_at < now() - ($2::text || ' days')::interval
       )
   `, [String(deleteAfterDays), String(retentionDays)]);

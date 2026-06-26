@@ -377,8 +377,56 @@ main { padding: 22px; display: grid; gap: 16px; }
   border-radius: 14px;
   border: 1px solid rgba(55,231,212,.22);
 }
+.face-thumb-button {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(55,231,212,.34);
+  background: rgba(55,231,212,.08);
+}
+.face-thumb-button img {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  transition: transform .18s ease;
+}
+.face-thumb-button span {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(7,16,24,.82);
+  color: var(--cyan);
+  font-size: .68rem;
+  font-weight: 1000;
+}
+.face-thumb-button:hover img {
+  transform: scale(1.08);
+}
+.face-placeholder {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(55,231,212,.36);
+  border-radius: 14px;
+  background: rgba(55,231,212,.08);
+  color: var(--cyan);
+  font-size: 1.35rem;
+  font-weight: 1000;
+}
 .face-card form {
   display: grid;
+  gap: 8px;
+}
+.enrolled-identity-body {
+  display: grid;
+  align-content: start;
   gap: 8px;
 }
 .face-actions {
@@ -630,6 +678,56 @@ main { padding: 22px; display: grid; gap: 16px; }
   color: var(--muted);
 }
 .viewer-meta b { color: var(--text); }
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: none;
+  padding: 24px;
+  background: rgba(0,0,0,.78);
+  backdrop-filter: blur(10px);
+}
+.image-viewer.open {
+  display: grid;
+  place-items: center;
+}
+.image-viewer-card {
+  width: min(820px, 96vw);
+  max-height: 94vh;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(55,231,212,.28);
+  border-radius: 18px;
+  background: rgba(10,18,28,.96);
+  box-shadow: 0 28px 90px rgba(0,0,0,.55);
+}
+.image-viewer-stage {
+  height: min(68vh, 620px);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.035) 25%, transparent 25%),
+    #030910;
+  background-size: 24px 24px;
+}
+.image-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center;
+  transition: transform .16s ease;
+}
+.viewer-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .toast.show { opacity: 1; transform: translateY(0); }
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }

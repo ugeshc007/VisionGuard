@@ -339,6 +339,25 @@
         <div id="cameraViewerMeta" class="viewer-meta"></div>
       </div>
     </div>
+    <div id="faceImageViewer" class="image-viewer" aria-hidden="true">
+      <div class="image-viewer-card">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Face image review</span>
+            <h2 id="faceImageViewerTitle">Detected face</h2>
+          </div>
+          <button id="closeFaceImageViewer" class="ghost" type="button">Close</button>
+        </div>
+        <div class="image-viewer-stage">
+          <img id="faceImageViewerImg" alt="Detected face full preview" />
+        </div>
+        <div class="viewer-toolbar">
+          <button id="zoomFaceImageOut" class="ghost" type="button">Zoom out</button>
+          <button id="resetFaceImageZoom" class="ghost" type="button">Reset</button>
+          <button id="zoomFaceImageIn" type="button">Zoom in</button>
+        </div>
+      </div>
+    </div>
     <script src="/app.js" type="module"></script>
   </body>
 </html>
