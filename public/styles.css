@@ -469,6 +469,56 @@ main { padding: 22px; display: grid; gap: 16px; }
   color: var(--muted);
   font-size: .78rem;
 }
+.movement-person-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.movement-person-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(55,231,212,.18);
+  border-radius: 16px;
+  background: rgba(255,255,255,.04);
+}
+.movement-person-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.movement-person-head > div {
+  display: grid;
+  gap: 3px;
+}
+.movement-person-card small {
+  color: var(--muted);
+}
+.movement-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.movement-area-list {
+  display: grid;
+  gap: 8px;
+}
+.movement-area-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 13px;
+  background: rgba(3,9,16,.34);
+}
+.movement-area-row > small {
+  grid-column: 1 / -1;
+}
+.movement-area-row span {
+  color: var(--gold);
+  font-weight: 1000;
+}
 .empty-state {
   padding: 18px;
   border: 1px dashed rgba(255,255,255,.22);
@@ -734,7 +784,7 @@ main { padding: 22px; display: grid; gap: 16px; }
   .sidebar { position: static; height: auto; }
   nav { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .hero, .two-col { grid-template-columns: 1fr; }
-  .kpi-grid, .form-grid, .camera-grid, .people-grid, .rule-grid, .analytics-grid, .face-grid, .flow-grid, .local-camera-layout, .pipeline-grid, .day-card-grid { grid-template-columns: 1fr; }
+  .kpi-grid, .form-grid, .camera-grid, .people-grid, .rule-grid, .analytics-grid, .face-grid, .flow-grid, .local-camera-layout, .pipeline-grid, .day-card-grid, .movement-person-grid { grid-template-columns: 1fr; }
   .camera-tuning { grid-template-columns: 1fr; }
   .forensic-face-box, .face-gallery, .compact-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

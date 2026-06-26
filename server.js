@@ -1908,7 +1908,45 @@ async function readAreaTraffic(date = today()) {
     if (item.flowDirection === "exit") byArea[area].totalOut += Number(item.count || 0);
     else byArea[area].totalIn += Number(item.count || 0);
   });
-  return { date: targetDate, dwell, flow, flowSummary: Object.values(byArea) };
+  const peopleMap = new Map();
+  for (const row of dwell) {
+    const identityKey = row.personId || row.visitorLabel || row.displayName || row.id;
+    if (!peopleMap.has(identityKey)) {
+      peopleMap.set(identityKey, {
+        identityKey,
+        personId: row.personId,
+        displayName: row.displayName || row.visitorLabel || "Unknown visitor",
+        visitorLabel: row.visitorLabel,
+        category: row.category || "visitor",
+        firstSeen: row.firstSeen,
+        lastSeen: row.lastSeen,
+        totalSeconds: 0,
+        detectionCount: 0,
+        areaCount: 0,
+        areas: []
+      });
+    }
+    const person = peopleMap.get(identityKey);
+    person.firstSeen = new Date(row.firstSeen) < new Date(person.firstSeen) ? row.firstSeen : person.firstSeen;
+    person.lastSeen = new Date(row.lastSeen) > new Date(person.lastSeen) ? row.lastSeen : person.lastSeen;
+    person.totalSeconds += Number(row.secondsSpent || 0);
+    person.detectionCount += Number(row.detectionCount || 0);
+    person.areas.push({
+      areaName: row.areaName || row.cameraName || "Unassigned area",
+      cameraName: row.cameraName || row.areaName || "Camera",
+      cameraId: row.cameraId,
+      firstSeen: row.firstSeen,
+      lastSeen: row.lastSeen,
+      secondsSpent: Number(row.secondsSpent || 0),
+      detectionCount: Number(row.detectionCount || 0)
+    });
+  }
+  const people = [...peopleMap.values()].map((person) => {
+    person.areas.sort((a, b) => Number(b.secondsSpent || 0) - Number(a.secondsSpent || 0));
+    person.areaCount = new Set(person.areas.map((area) => area.areaName)).size;
+    return person;
+  }).sort((a, b) => Number(b.totalSeconds || 0) - Number(a.totalSeconds || 0));
+  return { date: targetDate, dwell, people, flow, flowSummary: Object.values(byArea) };
 }
 
 async function runDailyFaceRetention(targetDate = yesterday()) {

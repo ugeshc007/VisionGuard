@@ -53,6 +53,7 @@ const els = {
   attendanceTable: $("#attendanceTable"),
   vehicleTable: $("#vehicleTable"),
   areaTrafficDate: $("#areaTrafficDate"),
+  areaTrafficFilter: $("#areaTrafficFilter"),
   flowSummaryGrid: $("#flowSummaryGrid"),
   areaDwellTable: $("#areaDwellTable"),
   forensicFaceGallery: $("#forensicFaceGallery"),
@@ -704,14 +705,48 @@ function renderAreaTraffic(traffic) {
     </article>
   `).join("") : `<div class="empty-state">No entry/exit movement for this date. Configure cameras as Entry or Exit and process face detections.</div>`;
 
-  els.areaDwellTable.innerHTML = traffic.dwell.length ? traffic.dwell.map((row) => `
-    <div class="table-row">
-      <strong>${escapeHtml(row.displayName || row.visitorLabel || "Unknown visitor")}</strong>
-      <span class="status ${statusClass(row.category)}">${escapeHtml(row.category)}</span>
-      <small>${escapeHtml(row.areaName)} | ${formatDuration(row.secondsSpent)} | ${row.detectionCount} detection(s)</small>
-      <small>${new Date(row.firstSeen).toLocaleString()} - ${new Date(row.lastSeen).toLocaleString()}</small>
+  const filter = els.areaTrafficFilter?.value || "all";
+  const people = (traffic.people || []).filter((person) => {
+    if (filter === "all") return true;
+    const category = String(person.category || "").toLowerCase();
+    if (filter === "staff") return category === "staff" || category === "employee";
+    if (filter === "unknown") return category === "unknown" || String(person.displayName || "").toLowerCase().includes("unknown");
+    return category === filter;
+  });
+  els.areaDwellTable.innerHTML = people.length ? `
+    <div class="movement-person-grid">
+      ${people.map((person) => `
+        <article class="movement-person-card">
+          <div class="movement-person-head">
+            <div>
+              <strong>${escapeHtml(person.displayName || person.visitorLabel || "Unknown visitor")}</strong>
+              <small>${escapeHtml(person.visitorLabel || person.personId || "No identity id")}</small>
+            </div>
+            <span class="status ${statusClass(person.category)}">${escapeHtml(person.category || "visitor")}</span>
+          </div>
+          <div class="flow-stats movement-stats">
+            <span><b>${formatDuration(person.totalSeconds || 0)}</b><small>Total stay</small></span>
+            <span><b>${Number(person.areaCount || 0)}</b><small>Areas</small></span>
+            <span><b>${Number(person.detectionCount || 0)}</b><small>Detections</small></span>
+          </div>
+          <small>First seen: ${new Date(person.firstSeen).toLocaleString()}</small>
+          <small>Last seen: ${new Date(person.lastSeen).toLocaleString()}</small>
+          <div class="movement-area-list">
+            ${(person.areas || []).map((area) => `
+              <div class="movement-area-row">
+                <div>
+                  <strong>${escapeHtml(area.areaName || "Unassigned area")}</strong>
+                  <small>${escapeHtml(area.cameraName || area.cameraId || "Camera")}</small>
+                </div>
+                <span>${formatDuration(area.secondsSpent || 0)}</span>
+                <small>${new Date(area.firstSeen).toLocaleTimeString()} - ${new Date(area.lastSeen).toLocaleTimeString()} | ${Number(area.detectionCount || 0)} hit(s)</small>
+              </div>
+            `).join("")}
+          </div>
+        </article>
+      `).join("")}
     </div>
-  `).join("") : `<div class="empty-state">No dwell-time records yet for this date.</div>`;
+  ` : `<div class="empty-state">No ${escapeHtml(filter === "all" ? "people" : filter)} dwell records for this date.</div>`;
 }
 
 function formatDuration(seconds = 0) {
@@ -854,6 +889,7 @@ function bindActions() {
   $("#syncStreamGatewayButton")?.addEventListener("click", syncStreamGateway);
   els.runFaceRetentionButton?.addEventListener("click", runFaceRetention);
   els.areaTrafficDate?.addEventListener("change", renderReports);
+  els.areaTrafficFilter?.addEventListener("change", renderReports);
   $$("[data-camera-layout]").forEach((button) => {
     button.addEventListener("click", () => {
       state.cameraWallSize = Number(button.dataset.cameraLayout || 4);
@@ -1012,8 +1048,8 @@ function openFaceImageViewer(src, title = "Detected face") {
   if (!els.faceImageViewer || !els.faceImageViewerImg || !src) return;
   els.faceImageViewerTitle.textContent = title || "Detected face";
   els.faceImageViewerImg.src = src;
-  state.faceImageZoom = 1;
-  setFaceImageZoom(1);
+  state.faceImageZoom = 2.25;
+  setFaceImageZoom(2.25);
   els.faceImageViewer.classList.add("open");
   els.faceImageViewer.setAttribute("aria-hidden", "false");
 }
