@@ -6,7 +6,7 @@ const vehiclesRoutes= require("./vehicles.routes");
 const privacyRoutes= require("./privacy.routes");
 const auditRoutes= require("./audit.routes");
 const identityRoutes= require("./identity.routes");
-
+const rulesRoutes= require("./rules.routes");
 
 
 
@@ -16,6 +16,7 @@ router.use("/vehicles", vehiclesRoutes);
 router.use("/privacy", privacyRoutes);
 router.use("/audit", auditRoutes);
 router.use("/people", identityRoutes); 
+router.use("/rules", rulesRoutes);
 // router.use("/employees", employeeRoutes);
 // router.use("/faces", faceRoutes);
 
