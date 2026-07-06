@@ -1,0 +1,103 @@
+// const express = require("express");
+// const bodyParser = require("body-parser");
+// const cors = require("cors");
+// const pg = require("pg");
+// const { Pool } = pg;
+// const app = express();
+// const port = process.env.PORT || 7070;
+// const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
+// const apiRoutes = require("./routes");
+
+// app.use(cors());
+// app.use(bodyParser.json());
+// app.use(bodyParser.urlencoded({ extended: true }));
+// app.use("/api", apiRoutes);
+
+
+require("dotenv").config({});
+
+const express = require("express");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const morgan = require("morgan");
+
+const app = express();
+
+const port = process.env.PORT
+
+morgan.token("time", () => {
+  return new Date().toISOString(); // clean ISO timestamp
+});
+
+
+app.use(morgan("dev"));
+
+// Import all API routes
+const apiRoutes = require("./routes");
+
+// ======================
+// Middleware
+// ======================
+
+app.use(cors());
+
+app.use(bodyParser.json());
+
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// ======================
+// Health Check
+// ======================
+
+app.get("/", (req, res) => {
+    res.json({
+        success: true,
+        message: "VisionGuard Face Service is running.",
+    });
+});
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        service: "VisionGuard Face Service",
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+    });
+});
+
+// ======================
+// API Routes
+// ======================
+
+app.use("/api", apiRoutes);
+
+// ======================
+// 404 Route
+// ======================
+
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: "Route not found",
+    });
+});
+
+// ======================
+// Global Error Handler
+// ======================
+
+app.use((err, req, res, next) => {
+    console.error(err);
+
+    res.status(err.status || 500).json({
+        success: false,
+        message: err.message || "Internal Server Error",
+    });
+});
+
+// ======================
+// Start Server
+// ======================
+
+app.listen(port, () => {
+    console.log(`🚀 Server running on http://localhost:${port}`);
+});
