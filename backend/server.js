@@ -34,6 +34,8 @@ app.use(morgan("dev"));
 
 // Import all API routes
 const apiRoutes = require("./routes");
+const { runStartupBackfills, startFaceRetentionScheduler } = require("./utils/faceEngine.js");
+const { syncAllGatewayStreams } = require("./controllers/streams.controller.js");
 
 // ======================
 // Middleware
@@ -98,6 +100,21 @@ app.use((err, req, res, next) => {
 // Start Server
 // ======================
 
-app.listen(port, () => {
-    console.log(`🚀 Server running on http://localhost:${port}`);
-});
+async function bootstrap() {
+    await runStartupBackfills().catch((error) => {
+        console.error("Startup backfills failed:", error.message);
+    });
+    app.listen(port, () => {
+        console.log(`🚀 Server running on http://localhost:${port}`);
+        startFaceRetentionScheduler();
+        syncAllGatewayStreams()
+            .then((results) => {
+                const synced = results.filter((item) => item.ok).length;
+                const failed = results.filter((item) => item.ok === false).length;
+                console.log(`Stream gateway sync: ${synced}/${results.length} synced, ${failed} failed`);
+            })
+            .catch((error) => console.warn(`Stream gateway sync skipped: ${error.message}`));
+    });
+}
+
+bootstrap();

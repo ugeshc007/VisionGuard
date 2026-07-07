@@ -13,6 +13,18 @@ const visitsRoutes= require("./visits.routes");
 const analyticsRoutes= require("./analytics.routes");
 const areaTrafficRoutes= require("./area-traffic.routes");
 const simulateEventRoutes= require("./simulate-event.routes");
+const healthRoutes = require("./health.routes");
+const dashboardRoutes = require("./dashboard.routes");
+const pipelineRoutes = require("./pipeline.routes");
+const snapshotRoutes = require("./snapshot.routes");
+const streamsRoutes = require("./streams.routes");
+const capturesRoutes = require("./captures.routes");
+const facesRoutes = require("./faces.routes");
+const faceDaysRoutes = require("./face-days.routes");
+const personTracksRoutes = require("./person-tracks.routes");
+const faceAiRoutes = require("./face-ai.routes");
+const forensicsRoutes = require("./forensics.routes");
+const reportsRoutes = require("./reports.routes");
 
 
 
@@ -21,7 +33,7 @@ router.use("/sites", sitesRoutes);
 router.use("/vehicles", vehiclesRoutes);
 router.use("/privacy", privacyRoutes);
 router.use("/audit", auditRoutes);
-router.use("/people", identityRoutes); 
+router.use("/people", identityRoutes);
 router.use("/rules", rulesRoutes);
 router.use("/events", eventsRoutes);
 router.use("/attendance", attendanceRoutes);
@@ -29,7 +41,18 @@ router.use("/visits", visitsRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/area-traffic", areaTrafficRoutes);
 router.use("/simulate-event", simulateEventRoutes);
+router.use("/health", healthRoutes);
+router.use("/dashboard", dashboardRoutes);
+router.use("/pipeline", pipelineRoutes);
+router.use("/snapshot", snapshotRoutes);
+router.use("/streams", streamsRoutes);
+router.use("/captures", capturesRoutes);
+router.use("/faces", facesRoutes);
+router.use("/face-days", faceDaysRoutes);
+router.use("/person-tracks", personTracksRoutes);
+router.use("/face-ai", faceAiRoutes);
+router.use("/forensics", forensicsRoutes);
+router.use("/reports", reportsRoutes);
 // router.use("/employees", employeeRoutes);
-// router.use("/faces", faceRoutes);
 
 module.exports = router;

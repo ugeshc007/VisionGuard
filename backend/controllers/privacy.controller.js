@@ -3,7 +3,7 @@ const { one, audit, sendJson } = require("../utils/utils.js");
 exports.getOne = async (req, res, next) => {
     try {
         const policy = await one("SELECT * FROM privacy_policies WHERE id = 'default' LIMIT 1");
-        return sendJson(res, 200, policy);
+        return sendJson(res, 200, { policy });
     } catch (error) {
         next(error);
     }
@@ -31,7 +31,7 @@ exports.create = async (req, res, next) => {
             ]
         );
         await audit("privacy_policy_updated", "Default face privacy policy updated");
-        return sendJson(res, 201, policy);
+        return sendJson(res, 201, { policy });
     } catch (error) {
         next(error);
     }
