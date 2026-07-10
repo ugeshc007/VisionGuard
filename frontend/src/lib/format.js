@@ -90,3 +90,5 @@ export function makeVisitorCode(serialRef, index = 0) {
   const serial = String(serialRef.current + index).padStart(4, "0");
   return `VIS-${date}-${serial}`;
 }
+
+export const CAPTURE_RESUME_KEY = "visionguard.captureSession";

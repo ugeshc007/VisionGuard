@@ -74,7 +74,9 @@ function enrichCameraStream(camera = {}) {
   const alias = cameraAlias(camera);
   const streamUrl = String(camera.streamUrl || "");
   const playable = isGatewayPlayable(streamUrl) && camera.gatewayEnabled !== false;
-  const src = encodeURIComponent(alias);
+  // Point browser playback at the dedicated "-web" stream (ffmpeg-transcoded to H.264),
+  // not the raw camera alias — most NVRs here encode H.265, which hls.js/MSE can't decode.
+  const src = encodeURIComponent(`${alias}-web`);
   const status = cameraStatusFromSource(camera);
   return {
     ...camera,
@@ -85,6 +87,13 @@ function enrichCameraStream(camera = {}) {
     publicGatewayUrl: publicStreamGatewayUrl,
     playable,
     hlsUrl: playable ? `${publicStreamGatewayUrl}/api/stream.m3u8?src=${src}` : "",
+    // WHEP-style endpoint: POST an SDP offer, get an SDP answer back. Preferred over hlsUrl
+    // for browser playback — go2rtc's live HLS remux of the transcoded stream reliably
+    // throws a fatal hls.js fragParsingError, whereas WebRTC uses the browser's native
+    // RTP/H.264 decode path and actually renders frames. Routed through our own backend
+    // (not go2rtc directly) because go2rtc's /api/webrtc doesn't send CORS headers on its
+    // OPTIONS preflight, which browsers require for a cross-port POST.
+    webrtcUrl: playable ? `/api/streams/webrtc?src=${src}` : "",
     webrtcPageUrl: playable ? `${publicStreamGatewayUrl}/stream.html?src=${src}` : "",
     mjpegUrl: playable ? `${publicStreamGatewayUrl}/api/frame.jpeg?src=${src}` : "",
     streamStatus: playable ? "gateway-ready" : streamUrl ? "local-or-unsupported" : "no-stream"

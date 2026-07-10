@@ -43,9 +43,12 @@ const { syncAllGatewayStreams } = require("./controllers/streams.controller.js")
 
 app.use(cors());
 
-app.use(bodyParser.json());
+// Capture payloads carry a full base64 camera frame plus per-face crops, which can
+// comfortably exceed body-parser's 100kb default — raise it well above what a
+// multi-megapixel frame + several face crops needs.
+app.use(bodyParser.json({ limit: "25mb" }));
 
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "25mb" }));
 
 // ======================
 // Health Check

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.js";
-import { clamp, cosineSimilarity, displayFaceName, isBrowserLocalCamera, isRemoteFrameCamera, makeVisitorCode } from "../lib/format.js";
+import { clamp, cosineSimilarity, displayFaceName, isBrowserLocalCamera, isRemoteFrameCamera, localizeGatewayUrl, makeVisitorCode } from "../lib/format.js";
+import { attachWebRTC } from "../lib/webrtc.js";
 
 const CAPTURE_RESUME_KEY = "visionguard.captureSession";
 
@@ -15,6 +16,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
   // matching the original module-level `state` object semantics.
   const m = useRef({
     localStream: null,
+    remoteConnection: null,
     autoCaptureTimer: null,
     autoCaptureBusy: false,
     autoCaptureMode: "selected",
@@ -38,6 +40,36 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
   useEffect(() => { m.cameras = cameras; }, [cameras]);
   useEffect(() => { m.faces = faces; }, [faces]);
   useEffect(() => { m.selectedCameraId = selectedCameraId; }, [selectedCameraId]);
+
+  const selectedCamera = cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
+
+  // Depend on primitive fields (not the `cameras` array reference) so this doesn't
+  // tear down and reconnect the WebRTC preview every time reload() refreshes the
+  // camera list (e.g. after each auto-capture save).
+  useEffect(() => {
+    if (m.remoteConnection) {
+      try { m.remoteConnection.destroy(); } catch { /* ignore */ }
+      m.remoteConnection = null;
+    }
+    if (!selectedCamera || isBrowserLocalCamera(selectedCamera) || !selectedCamera.playable || !selectedCamera.webrtcUrl) return undefined;
+    const video = videoRef.current;
+    if (!video) return undefined;
+    if (m.localStream) {
+      m.localStream.getTracks().forEach((track) => track.stop());
+      m.localStream = null;
+    }
+    video.srcObject = null;
+    m.remoteConnection = attachWebRTC(video, localizeGatewayUrl(selectedCamera.webrtcUrl));
+    startFaceTracking();
+    setStatusText(`Previewing ${selectedCamera.name} live over WebRTC. Start detection to save new faces.`);
+    return () => {
+      if (m.remoteConnection) {
+        try { m.remoteConnection.destroy(); } catch { /* ignore */ }
+        m.remoteConnection = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCamera?.id, selectedCamera?.playable, selectedCamera?.webrtcUrl]);
 
   function selectedCaptureCamera() {
     const selectedId = m.selectedCameraId || m.cameras[0]?.id || "";
@@ -391,8 +423,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const tick = () => {
-      if (!video.srcObject) return;
-      if (video.videoWidth && video.videoHeight) {
+      if (video.srcObject && video.videoWidth && video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -722,6 +753,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     if (m.autoCaptureTimer) clearInterval(m.autoCaptureTimer);
     if (m.trackingFrame) cancelAnimationFrame(m.trackingFrame);
     if (m.localStream) m.localStream.getTracks().forEach((track) => track.stop());
+    if (m.remoteConnection) { try { m.remoteConnection.destroy(); } catch { /* ignore */ } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

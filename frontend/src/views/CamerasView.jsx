@@ -8,7 +8,9 @@ import { isRemoteFrameCamera } from "../lib/format.js";
 
 export default function CamerasView() {
   const { data, reload, siteName, processPendingFaces } = useAppData();
+  // console.log({data, reload, siteName, processPendingFaces});
   const { toast, openCameraViewer } = useUi();
+  // console.log( openCameraViewer);
   const [streamGatewayStatus, setStreamGatewayStatus] = useState("go2rtc converts RTSP/DVR streams into browser-friendly HLS/WebRTC previews.");
 
   const capture = useCameraCapture({
@@ -18,6 +20,7 @@ export default function CamerasView() {
     reload,
     processPendingFaces
   });
+  // console.log("capture", capture);
 
   const resumedRef = useRef(false);
   useEffect(() => {
@@ -113,14 +116,14 @@ export default function CamerasView() {
             <span className="eyebrow">Development camera</span>
             <h2>Local laptop camera capture</h2>
           </div>
-          <button type="button" onClick={addLocalCamera}>Add Local Camera</button>
+          {/* <button type="button" onClick={addLocalCamera}>Add Local Camera</button> */}
         </div>
-        <div className="local-camera-layout">
-          <div className="video-box">
+        <div className="local-camera-layout border-2 border-[red]">
+          <div className="video-box  ">
             <video ref={capture.videoRef} autoPlay muted playsInline />
             <canvas ref={capture.canvasRef} />
           </div>
-          <div className="local-camera-controls">
+          <div className="local-camera-controls  border-[blue] border-2">
             <label>Capture camera source
               <select value={capture.selectedCameraId} onChange={(event) => capture.selectCamera(event.target.value)}>
                 {data.cameras.length ? data.cameras.map((camera) => (
@@ -143,6 +146,17 @@ export default function CamerasView() {
             <p>{capture.statusText}</p>
           </div>
         </div>
+        {/* <div className="border-2 border-yellow-400  w-full h-[500px]">
+          <video
+            // src="http://localhost:1984/stream.html?src=cam-entry-door-web&mode=webrtc,mse,hls,mjpeg"
+            src="http://localhost:1984/api/stream.m3u8?src=cam-my-cabin-web"
+            // type="application/x-mpegURL"
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-fulll" />
+
+        </div> */}
       </section>
 
       <section className="panel">

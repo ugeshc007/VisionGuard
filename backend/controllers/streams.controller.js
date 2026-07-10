@@ -29,8 +29,16 @@ async function syncGatewayStream(camera = {}) {
         return { cameraId: camera.id, alias: cameraAlias(camera), skipped: true, reason: streamUrl ? "unsupported" : "missing stream url" };
     }
     const alias = cameraAlias(camera);
-    const params = new URLSearchParams({ name: alias, src: streamUrl });
-    const result = await gatewayRequest(`/api/streams?${params.toString()}`, { method: "PUT" });
+    const rawParams = new URLSearchParams({ name: alias, src: streamUrl });
+    const rawResult = await gatewayRequest(`/api/streams?${rawParams.toString()}`, { method: "PUT" });
+    // Most RTSP cameras/NVRs on site encode in H.265, which browsers can't decode via
+    // HLS/MSE (hls.js) — the <video> element silently stays at 0x0. Register a second,
+    // dedicated stream name whose only producer is go2rtc spawning ffmpeg to transcode the
+    // raw stream (referenced by alias, so it reuses go2rtc's own connection rather than
+    // opening a second one to the camera) to H.264 on demand for browser playback.
+    const webParams = new URLSearchParams({ name: `${alias}-web`, src: `ffmpeg:${alias}#video=h264` });
+    const webResult = await gatewayRequest(`/api/streams?${webParams.toString()}`, { method: "PUT" });
+    const result = webResult.ok ? webResult : rawResult;
     return { cameraId: camera.id, alias, streamUrl, ...result };
 }
 
@@ -81,6 +89,28 @@ exports.syncStreams = async (req, res, next) => {
         });
     } catch (error) {
         next(error);
+    }
+};
+
+exports.postWebRtcOffer = async (req, res) => {
+    // go2rtc's /api/webrtc (WHEP-style: POST an SDP offer, get an SDP answer) doesn't send
+    // CORS headers on its OPTIONS preflight, so browsers block a direct cross-port POST from
+    // the frontend. Proxy it server-side instead, where CORS doesn't apply.
+    const src = String(req.query.src || "").trim();
+    if (!src) return res.status(400).json({ message: "src is required" });
+    if (typeof req.body !== "string" || !req.body) return res.status(400).json({ message: "SDP offer body is required" });
+    try {
+        const params = new URLSearchParams({ src });
+        const response = await fetch(`${streamGatewayUrl}/api/webrtc?${params.toString()}`, {
+            method: "POST",
+            headers: { "content-type": "application/sdp" },
+            body: req.body
+        });
+        const answerSdp = await response.text();
+        if (!response.ok) return res.status(response.status).json({ message: answerSdp || "Gateway WebRTC request failed" });
+        res.status(200).type("application/sdp").send(answerSdp);
+    } catch (error) {
+        res.status(502).json({ message: error.message || "Could not reach stream gateway" });
     }
 };
 

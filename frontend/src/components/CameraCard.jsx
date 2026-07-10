@@ -1,20 +1,20 @@
 import { useEffect, useRef } from "react";
 import { localizeGatewayUrl, statusClass, cameraRoleLabel } from "../lib/format.js";
-import { attachHls } from "../lib/hls.js";
+import { attachWebRTC } from "../lib/webrtc.js";
 
 export default function CameraCard({ camera, manager = false, siteName, onOpen, onSaveTuning, onDelete }) {
   const videoRef = useRef(null);
-  const hlsUrl = localizeGatewayUrl(camera.hlsUrl);
-  const webrtcUrl = localizeGatewayUrl(camera.webrtcPageUrl);
-  const playable = camera.playable && hlsUrl;
+  const webrtcUrl = localizeGatewayUrl(camera.webrtcUrl);
+  const webrtcPageUrl = localizeGatewayUrl(camera.webrtcPageUrl);
+  const playable = camera.playable && webrtcUrl;
 
   useEffect(() => {
     if (!playable || !videoRef.current) return undefined;
-    const player = attachHls(videoRef.current, hlsUrl);
+    const connection = attachWebRTC(videoRef.current, webrtcUrl);
     return () => {
-      try { player?.destroy(); } catch { /* ignore */ }
+      try { connection?.destroy(); } catch { /* ignore */ }
     };
-  }, [playable, hlsUrl]);
+  }, [playable, webrtcUrl]);
 
   function handleTuningSubmit(event) {
     event.preventDefault();
@@ -38,7 +38,7 @@ export default function CameraCard({ camera, manager = false, siteName, onOpen, 
         <strong>{camera.zone || camera.name}</strong>
         <small>{siteName(camera.siteId)} | {cameraRoleLabel(camera.cameraRole)} | {camera.fps} FPS | Health {camera.health}%</small>
         <small title={camera.streamUrl || ""}>Link: {camera.streamUrl ? camera.streamUrl : "No stream URL configured"}</small>
-        {webrtcUrl ? <small><a href={webrtcUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open low-latency WebRTC preview</a></small> : null}
+        {webrtcPageUrl ? <small><a href={webrtcPageUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open low-latency WebRTC preview</a></small> : null}
         <small>AI: min {Number(camera.minFaceSize || 48)}px | quality {Number(camera.qualityThreshold || 45)}% | {Number(camera.detectionIntervalMs || 650)}ms</small>
         <div className="bar"><span style={{ width: `${Math.max(6, Number(camera.health || 0))}%` }} /></div>
       </div>
