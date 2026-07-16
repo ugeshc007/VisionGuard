@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { FaceDetector, FilesetResolver } from "@mediapipe/tasks-vision";
 import { api } from "../lib/api.js";
 import { clamp, cosineSimilarity, displayFaceName, isBrowserLocalCamera, isRemoteFrameCamera, localizeGatewayUrl, makeVisitorCode } from "../lib/format.js";
 import { attachWebRTC } from "../lib/webrtc.js";
+
+const MEDIAPIPE_WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
+// full_range (not short_range) - trained for faces further from the camera and at
+// wider angles, which matches this app's overhead/wide-FOV CCTV footage far better
+// than BlazeFace's short-range (webcam/selfie) model.
+const MEDIAPIPE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite";
 
 const CAPTURE_RESUME_KEY = "visionguard.captureSession";
 
@@ -22,9 +29,12 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     autoCaptureMode: "selected",
     activeCaptureCameraId: "",
     activeCaptureCameraIds: [],
+    rotationTimer: null,
+    rotationIndex: -1,
     captureSessionStats: { attempts: 0, saved: 0, skipped: 0 },
     trackingFrame: null,
-    blazeFaceModel: null,
+    faceOverlayEnabled: true,
+    mediaPipeDetector: null,
     faceDetectorMode: "idle",
     liveFaces: [],
     lastTrackedBoxes: [],
@@ -51,14 +61,19 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
       try { m.remoteConnection.destroy(); } catch { /* ignore */ }
       m.remoteConnection = null;
     }
-    if (!selectedCamera || isBrowserLocalCamera(selectedCamera) || !selectedCamera.playable || !selectedCamera.webrtcUrl) return undefined;
     const video = videoRef.current;
+    // Clear immediately, before the playable/webrtcUrl check below. Otherwise
+    // switching to a camera that isn't WebRTC-playable (not gateway-synced yet,
+    // or a placeholder with no stream) leaves the previous camera's last frame
+    // frozen on screen - closing its connection stops new frames arriving, but
+    // doesn't blank the <video> element on its own.
+    if (video) video.srcObject = null;
+    if (!selectedCamera || isBrowserLocalCamera(selectedCamera) || !selectedCamera.playable || !selectedCamera.webrtcUrl) return undefined;
     if (!video) return undefined;
     if (m.localStream) {
       m.localStream.getTracks().forEach((track) => track.stop());
       m.localStream = null;
     }
-    video.srcObject = null;
     m.remoteConnection = attachWebRTC(video, localizeGatewayUrl(selectedCamera.webrtcUrl));
     startFaceTracking();
     setStatusText(`Previewing ${selectedCamera.name} live over WebRTC. Start detection to save new faces.`);
@@ -71,6 +86,18 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCamera?.id, selectedCamera?.playable, selectedCamera?.webrtcUrl]);
 
+  // Default behavior: rotate the preview through every WebRTC-playable camera
+  // whenever nothing else is driving what's shown (no detection running, and no
+  // manual camera pick from the dropdown - see selectCamera below, which pauses
+  // this). Detection itself never starts on its own; it's still only ever
+  // triggered by the explicit start buttons.
+  useEffect(() => {
+    if (captureMode !== "idle") return undefined;
+    startCameraRotation(getActiveRemoteCameraIds);
+    return () => stopCameraRotation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureMode]);
+
   function selectedCaptureCamera() {
     const selectedId = m.selectedCameraId || m.cameras[0]?.id || "";
     return m.cameras.find((camera) => camera.id === selectedId) || m.cameras[0] || null;
@@ -80,6 +107,10 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     if (m.autoCaptureTimer && m.autoCaptureMode === "selected") {
       stopAutoCapture("Camera selection changed. Detection stopped.");
     }
+    // Manually picking a camera overrides the default rotation - otherwise the
+    // next rotation tick (up to 6s later) would yank the preview away from what
+    // was just explicitly chosen.
+    stopCameraRotation();
     setSelectedCameraIdState(cameraId);
   }
 
@@ -91,55 +122,118 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     });
   }
 
-  async function loadBlazeFaceModel() {
-    if (m.blazeFaceModel) return m.blazeFaceModel;
-    if (!window.blazeface) return null;
+  async function loadMediaPipeDetector() {
+    if (m.mediaPipeDetector) return m.mediaPipeDetector;
+    if (m.mediaPipeDetector === false) return null;
     try {
-      m.blazeFaceModel = await window.blazeface.load();
-      return m.blazeFaceModel;
+      const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+      m.mediaPipeDetector = await FaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MEDIAPIPE_MODEL_URL, delegate: "GPU" },
+        runningMode: "IMAGE",
+        // 0.4 was too permissive - it let round, high-contrast non-face shapes
+        // (an RGB PC case fan, glass reflections) through as "faces," which then
+        // got sent off for a name lookup and wrongly tagged as a real person.
+        minDetectionConfidence: 0.6
+      });
+      return m.mediaPipeDetector;
     } catch (error) {
-      m.faceDetectorMode = `BlazeFace unavailable: ${error.message}`;
+      m.mediaPipeDetector = false;
+      m.faceDetectorMode = `MediaPipe unavailable: ${error.message}`;
       return null;
     }
   }
 
-  async function detectFaceBoxes(video, width, height) {
-    if ("FaceDetector" in window) {
-      try {
-        const detector = new window.FaceDetector({ fastMode: false, maxDetectedFaces: 12 });
-        const detected = await detector.detect(video);
-        if (detected.length) {
-          m.faceDetectorMode = "native FaceDetector";
-          return detected.map((face) => ({
-            x: clamp(face.boundingBox.x, 0, width),
-            y: clamp(face.boundingBox.y, 0, height),
-            width: clamp(face.boundingBox.width, 1, width - face.boundingBox.x),
-            height: clamp(face.boundingBox.height, 1, height - face.boundingBox.y),
-            confidence: 92
-          }));
-        }
-      } catch (error) {
-        m.faceDetectorMode = `native unavailable: ${error.message}`;
+  async function detectFaceBoxes(source, width, height) {
+    const detector = await loadMediaPipeDetector();
+    if (!detector) {
+      if (!m.faceDetectorMode.startsWith("MediaPipe unavailable")) m.faceDetectorMode = "not available";
+      return [];
+    }
+    const result = detector.detect(source);
+    m.faceDetectorMode = "MediaPipe (full-range)";
+    return (result.detections || []).map((detection) => {
+      const box = detection.boundingBox || {};
+      const score = detection.categories?.[0]?.score ?? 0;
+      return {
+        x: clamp(box.originX, 0, width),
+        y: clamp(box.originY, 0, height),
+        width: clamp(box.width, 1, width - box.originX),
+        height: clamp(box.height, 1, height - box.originY),
+        confidence: Math.round(score * 100)
+      };
+    });
+  }
+
+  function tileRegions(width, height) {
+    // Overhead/wide-angle CCTV frames put faces at a small fraction of the full
+    // frame, which the detector misses when run on the whole image at once.
+    // Scan overlapping tiles so each face fills a much larger share of what
+    // the detector actually sees.
+    //
+    // The model resizes whatever crop it's given down to its own small fixed
+    // input internally, so what matters isn't the tile's pixel size but how
+    // much of the tile's *area* the face occupies. A denser grid shrinks each
+    // tile's real-world coverage so the same face fills a much larger share
+    // of it before that internal resize.
+    const cols = 5;
+    const rows = 4;
+    const tileWidth = Math.min(width, Math.ceil((width / cols) * 1.3));
+    const tileHeight = Math.min(height, Math.ceil((height / rows) * 1.3));
+    const stepX = cols > 1 ? (width - tileWidth) / (cols - 1) : 0;
+    const stepY = rows > 1 ? (height - tileHeight) / (rows - 1) : 0;
+    const regions = [];
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        regions.push({
+          x: Math.round(clamp(col * stepX, 0, width - tileWidth)),
+          y: Math.round(clamp(row * stepY, 0, height - tileHeight)),
+          width: tileWidth,
+          height: tileHeight
+        });
       }
     }
-    const blazeFace = await loadBlazeFaceModel();
-    if (blazeFace) {
-      const predictions = await blazeFace.estimateFaces(video, false);
-      m.faceDetectorMode = "BlazeFace";
-      return predictions.map((prediction) => {
-        const [x1, y1] = prediction.topLeft;
-        const [x2, y2] = prediction.bottomRight;
-        return {
-          x: clamp(x1, 0, width),
-          y: clamp(y1, 0, height),
-          width: clamp(x2 - x1, 1, width - x1),
-          height: clamp(y2 - y1, 1, height - y1),
-          confidence: Math.round((prediction.probability?.[0] || 0.86) * 100)
-        };
-      });
-    }
-    m.faceDetectorMode = "not available";
-    return [];
+    return regions;
+  }
+
+  async function detectFacesInRegion(source, region) {
+    // Preserve the tile's aspect ratio when resizing into the detection canvas -
+    // stretching it to a fixed square would distort faces and hurt accuracy.
+    const maxTileDim = 640;
+    const scale = maxTileDim / Math.max(region.width, region.height);
+    const destWidth = Math.round(region.width * scale);
+    const destHeight = Math.round(region.height * scale);
+    const tileCanvas = document.createElement("canvas");
+    tileCanvas.width = destWidth;
+    tileCanvas.height = destHeight;
+    const tileContext = tileCanvas.getContext("2d", { willReadFrequently: true });
+    tileContext.drawImage(source, region.x, region.y, region.width, region.height, 0, 0, destWidth, destHeight);
+    const boxes = await detectFaceBoxes(tileCanvas, destWidth, destHeight);
+    const scaleX = region.width / destWidth;
+    const scaleY = region.height / destHeight;
+    return boxes.map((box) => ({
+      ...box,
+      x: region.x + (box.x * scaleX),
+      y: region.y + (box.y * scaleY),
+      width: box.width * scaleX,
+      height: box.height * scaleY
+    }));
+  }
+
+  function mergeOverlappingBoxes(boxes, iouThreshold = 0.3) {
+    const sorted = [...boxes].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+    const kept = [];
+    sorted.forEach((box) => {
+      if (!kept.some((existing) => boxIou(box, existing) > iouThreshold)) kept.push(box);
+    });
+    return kept;
+  }
+
+  async function detectFaceBoxesWide(source, width, height) {
+    const wholeFrameBoxes = await detectFaceBoxes(source, width, height);
+    if (width < 960 && height < 960) return wholeFrameBoxes;
+    const regions = tileRegions(width, height);
+    const tileBoxes = await Promise.all(regions.map((region) => detectFacesInRegion(source, region)));
+    return mergeOverlappingBoxes([...wholeFrameBoxes, ...tileBoxes.flat()]);
   }
 
   function drawFaceBoxes(context, boxes) {
@@ -212,6 +306,64 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     return best;
   }
 
+  async function identifyFaceOnServer(imageData) {
+    // The client-side embedding (computeImageEmbedding) is a crude 8x8
+    // average-luminance grid - nowhere near good enough to recognize a real
+    // face reliably. The backend's /api/forensics/face-search route runs the
+    // crop through the real embedding pipeline (InsightFace/embedding
+    // service) and compares it against trained people with pgvector cosine
+    // similarity, so that's what decides actual identity, not the local grid
+    // descriptor above (which only drives fast, latency-free box tracking).
+    try {
+      const result = await api("/api/forensics/face-search", {
+        method: "POST",
+        body: JSON.stringify({ imageData })
+      });
+      const best = (result.matches || [])[0];
+      if (!best || !best.personId) return null;
+      // The backend's own "reliable match" bar for its capture pipeline is 0.82,
+      // but that pipeline only ever feeds it pre-vetted face crops. Live tracking
+      // crops aren't vetted at all - a false detection (e.g. a PC case or a
+      // reflection) can still embed to *something*, so require a higher bar here
+      // to avoid confidently mislabeling non-face objects with a real person's name.
+      if (Number(best.similarity) < 0.9) return null;
+      return { personId: best.personId, name: best.displayName || best.label };
+    } catch {
+      return null;
+    }
+  }
+
+  function requestServerIdentity(track, crop, detectionConfidence = 0) {
+    if (!track || track.isKnown) return;
+    // Don't bother identifying low-confidence detections - these are the ones
+    // most likely to be false positives (round/high-contrast non-face shapes)
+    // rather than a real face worth a name lookup.
+    if (detectionConfidence < 55) return;
+    const now = Date.now();
+    if (now - Number(track.serverCheckAt || 0) < 6000) return;
+    track.serverCheckAt = now;
+    const imageData = crop.canvas.toDataURL("image/jpeg", 0.85);
+    identifyFaceOnServer(imageData).then((match) => {
+      const current = m.liveFaces.find((face) => face.trackId === track.trackId);
+      if (!current || current.isKnown) return;
+      if (!match) {
+        current.pendingMatch = null;
+        return;
+      }
+      // Require the same person to come back on two separate lookups before
+      // trusting it - a single lookup on a borderline/non-face crop can land
+      // above the similarity bar by chance, which is exactly what mislabeled
+      // a PC case as a person earlier.
+      if (current.pendingMatch?.personId === match.personId) {
+        current.isKnown = true;
+        current.personId = match.personId;
+        current.label = match.name;
+      } else {
+        current.pendingMatch = match;
+      }
+    });
+  }
+
   function findBestLiveTrack(box, embedding, usedTrackIds = new Set()) {
     let best = null;
     m.liveFaces.forEach((face) => {
@@ -265,13 +417,16 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
           box.isKnown = Boolean(track.isKnown);
           box.state = track.isKnown ? "known" : "tracking";
           box.confidenceLabel = recent.score ? `${Math.round(recent.score * 100)}%` : "";
+          requestServerIdentity(track, crop, box.confidence);
           return;
         }
       }
       const label = makeVisitorCode(visitorSerial, index);
       const trackId = `track-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`;
-      m.liveFaces.push({ trackId, label, embedding, box: { ...box }, lastSeen: now, isKnown: false, savedAt: 0 });
+      const newTrack = { trackId, label, embedding, box: { ...box }, lastSeen: now, isKnown: false, savedAt: 0 };
+      m.liveFaces.push(newTrack);
       usedTrackIds.add(trackId);
+      requestServerIdentity(newTrack, crop, box.confidence);
       box.label = label;
       box.trackId = trackId;
       box.isKnown = false;
@@ -310,12 +465,32 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     }));
   }
 
+  function padFaceBox(box, frameWidth, frameHeight) {
+    // MediaPipe's box is tight around eyes/nose/mouth, not the full head - left
+    // as-is, saved crops routinely cut off the chin and forehead. Pad it out
+    // (more on top, since hairline/forehead needs more room than the chin does)
+    // so the saved image actually shows a complete face. Only used for cropping/
+    // embedding - the on-screen tracking box stays true to what MediaPipe found.
+    const padX = box.width * 0.3;
+    const padTop = box.height * 0.45;
+    const padBottom = box.height * 0.25;
+    const x = clamp(box.x - padX, 0, frameWidth);
+    const y = clamp(box.y - padTop, 0, frameHeight);
+    return {
+      x,
+      y,
+      width: clamp(box.width + (padX * 2), 1, frameWidth - x),
+      height: clamp(box.height + padTop + padBottom, 1, frameHeight - y)
+    };
+  }
+
   function cropFace(context, box) {
+    const padded = padFaceBox(box, context.canvas.width, context.canvas.height);
     const canvas = document.createElement("canvas");
     canvas.width = 160;
     canvas.height = 160;
     const cropContext = canvas.getContext("2d", { willReadFrequently: true });
-    cropContext.drawImage(context.canvas, box.x, box.y, box.width, box.height, 0, 0, canvas.width, canvas.height);
+    cropContext.drawImage(context.canvas, padded.x, padded.y, padded.width, padded.height, 0, 0, canvas.width, canvas.height);
     return { canvas, context: cropContext, width: canvas.width, height: canvas.height };
   }
 
@@ -420,6 +595,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
 
   function startFaceTracking() {
     if (m.trackingFrame) cancelAnimationFrame(m.trackingFrame);
+    m.faceOverlayEnabled = true;
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const tick = () => {
@@ -428,23 +604,35 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
         canvas.height = video.videoHeight;
         const context = canvas.getContext("2d", { willReadFrequently: true });
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Detection was stopped - keep mirroring the live feed onto the canvas
+        // (so the picture doesn't freeze) but skip detection/box drawing so no
+        // stale or new boxes appear on top of it.
+        if (!m.faceOverlayEnabled) {
+          m.trackingFrame = requestAnimationFrame(tick);
+          return;
+        }
         const boxes = stabilizeFaceBoxes(context, []);
         drawFaceBoxes(context, boxes);
         if (boxes.length) {
           setStatusText(`Tracking ${boxes.length} face(s). Detector: ${m.faceDetectorMode}.`);
         }
         const now = Date.now();
-        if (!m.trackingBusy && now - m.lastDetectionAt > 280) {
+        const wideFrame = canvas.width >= 960 || canvas.height >= 960;
+        const detectionThrottleMs = wideFrame ? 1600 : 280;
+        if (!m.trackingBusy && now - m.lastDetectionAt > detectionThrottleMs) {
           m.trackingBusy = true;
           m.lastDetectionAt = now;
-          detectFaceBoxes(video, canvas.width, canvas.height)
+          detectFaceBoxesWide(video, canvas.width, canvas.height)
             .then((detectedBoxes) => {
               const stableBoxes = stabilizeFaceBoxes(context, detectedBoxes);
-              if (stableBoxes.length) {
-                setStatusText(`Tracking ${stableBoxes.length} face(s). Detector: ${m.faceDetectorMode}.`);
-              }
+              // Always report, even at 0 faces - otherwise there's no way to tell
+              // whether the detector is running (and finding nothing) or silently
+              // never firing at all.
+              setStatusText(stableBoxes.length
+                ? `Tracking ${stableBoxes.length} face(s). Detector: ${m.faceDetectorMode}. Frame ${canvas.width}x${canvas.height}.`
+                : `No face found in ${canvas.width}x${canvas.height} frame. Detector: ${m.faceDetectorMode}.`);
             })
-            .catch((error) => setStatusText(error.message))
+            .catch((error) => setStatusText(`Detection error: ${error.message}`))
             .finally(() => { m.trackingBusy = false; });
         }
       }
@@ -512,7 +700,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     canvas.height = height;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.drawImage(video, 0, 0, width, height);
-    const detectedBoxes = await detectFaceBoxes(video, width, height);
+    const detectedBoxes = await detectFaceBoxesWide(video, width, height);
     const boxes = stabilizeFaceBoxes(context, detectedBoxes);
     drawFaceBoxes(context, boxes);
     if (!boxes.length) {
@@ -553,7 +741,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     canvas.height = height;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.drawImage(image, 0, 0, width, height);
-    const detectedBoxes = await detectFaceBoxes(canvas, width, height);
+    const detectedBoxes = await detectFaceBoxesWide(canvas, width, height);
     const boxes = stabilizeFaceBoxes(context, detectedBoxes);
     drawFaceBoxes(context, boxes);
     if (!boxes.length) {
@@ -562,7 +750,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
       return { detected: 0, saved: 0, skipped: 0 };
     }
     const candidates = boxes.map((box, index) => buildFacePayload(context, box, index));
-    const facesToSave = options.skipClientDuplicateFilter === false ? filterNewFaceCandidates(candidates) : candidates;
+    const facesToSave = options.skipClientDuplicateFilter ? candidates : filterNewFaceCandidates(candidates);
     if (!facesToSave.length) {
       const tracked = candidates.filter((candidate) => candidate.trackId && isTrackRecentlyCaptured(candidate.trackId)).length;
       setStatusText(`Detected ${boxes.length} face(s) from ${camera.name}, but ${tracked || "all"} matched existing tracked/known faces.`);
@@ -603,14 +791,47 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     try { localStorage.removeItem(CAPTURE_RESUME_KEY); } catch { /* ignore */ }
   }
 
+  function startCameraRotation(getCandidateIds, intervalMs = 6000) {
+    stopCameraRotation();
+    const rotate = () => {
+      // Re-derive candidates fresh every tick (rather than a fixed list captured
+      // at start time) so a camera that becomes playable mid-rotation (gateway
+      // sync finishes, a new camera is added) gets picked up without needing to
+      // restart rotation.
+      const playableIds = getCandidateIds().filter((cameraId) => {
+        const camera = m.cameras.find((item) => item.id === cameraId);
+        return camera?.playable && camera?.webrtcUrl;
+      });
+      if (!playableIds.length) return;
+      m.rotationIndex = (m.rotationIndex + 1) % playableIds.length;
+      setSelectedCameraIdState(playableIds[m.rotationIndex]);
+    };
+    m.rotationIndex = -1;
+    rotate();
+    m.rotationTimer = setInterval(rotate, intervalMs);
+  }
+
+  function stopCameraRotation() {
+    if (m.rotationTimer) clearInterval(m.rotationTimer);
+    m.rotationTimer = null;
+    m.rotationIndex = -1;
+  }
+
   function stopAutoCapture(message = "AI auto capture stopped.") {
     if (m.autoCaptureTimer) clearInterval(m.autoCaptureTimer);
+    stopCameraRotation();
     clearCaptureSession();
     m.autoCaptureTimer = null;
     m.autoCaptureBusy = false;
     m.autoCaptureMode = "selected";
     m.activeCaptureCameraId = "";
     m.activeCaptureCameraIds = [];
+    // Stop drawing the tracking overlay too - the tick loop keeps running
+    // independently (to keep mirroring the live feed) but skips detection/boxes
+    // while this is false. Clearing lastTrackedBoxes drops any still-fading boxes
+    // immediately instead of waiting out their decay window.
+    m.faceOverlayEnabled = false;
+    m.lastTrackedBoxes = [];
     setCaptureMode("idle");
     setStatusText(message);
   }
@@ -629,6 +850,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
       const started = await startLocalCamera();
       if (!started) return;
     }
+    m.faceOverlayEnabled = true;
     m.autoCaptureMode = "selected";
     m.activeCaptureCameraId = selected.id;
     m.activeCaptureCameraIds = [selected.id];
@@ -670,6 +892,12 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     await toggleAutoCapture();
   }
 
+  function getActiveRemoteCameraIds() {
+    return m.cameras
+      .filter((camera) => String(camera.status || "").toLowerCase() !== "disabled" && isRemoteFrameCamera(camera) && !isBrowserLocalCamera(camera))
+      .map((camera) => camera.id);
+  }
+
   async function startAllCameras() {
     if (m.autoCaptureTimer) {
       setStatusText("Detection is already running. Use Stop detection before starting all cameras.");
@@ -684,6 +912,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
       toast("No active RTSP/HTTP cameras to start.");
       return;
     }
+    m.faceOverlayEnabled = true;
     m.autoCaptureMode = "all";
     m.activeCaptureCameraIds = activeCameras.map((camera) => camera.id);
     m.activeCaptureCameraId = "";
@@ -714,6 +943,11 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
     await runAllCaptureRound();
     const interval = Math.max(5000, Math.min(15000, Number(activeCameras[0]?.detectionIntervalMs || 650) * activeCameras.length));
     m.autoCaptureTimer = setInterval(runAllCaptureRound, interval);
+    // Detection above runs against all active cameras in the background via
+    // periodic snapshots - it never touched the visible video box. Rotate the
+    // single preview through each WebRTC-playable camera so "all cameras" mode
+    // actually shows more than just whatever was selected beforehand.
+    startCameraRotation(() => m.activeCaptureCameraIds);
   }
 
   async function resumeCaptureSession() {
@@ -751,6 +985,7 @@ export function useCameraCapture({ cameras, faces, toast, reload, processPending
 
   useEffect(() => () => {
     if (m.autoCaptureTimer) clearInterval(m.autoCaptureTimer);
+    if (m.rotationTimer) clearInterval(m.rotationTimer);
     if (m.trackingFrame) cancelAnimationFrame(m.trackingFrame);
     if (m.localStream) m.localStream.getTracks().forEach((track) => track.stop());
     if (m.remoteConnection) { try { m.remoteConnection.destroy(); } catch { /* ignore */ } }

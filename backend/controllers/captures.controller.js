@@ -67,7 +67,33 @@ exports.create = async (req, res, next) => {
         for (const [index, face] of faces.entries()) {
             const faceImage = face.imageData ? parseDataUrl(face.imageData) : null;
             const label = String(face.label || "").trim() || visitorCode(index);
+            const detectionConfidence = Number(face.confidence || 0);
+            // Below this, the detector itself is unreliable (e.g. a hand/cup mistaken
+            // for a face) - discard outright rather than writing it to
+            // detected_faces/identity_visits/area_dwell_sessions for review. Genuinely
+            // borderline faces above this bar still go through the low-quality review
+            // path below.
+            if (detectionConfidence < 50) {
+                skippedFaces.push({
+                    label,
+                    reason: "discarded-low-confidence",
+                    detail: `detector confidence ${detectionConfidence}% below 50%`
+                });
+                continue;
+            }
             const quality = scoreFaceQualityDetailed(face, captureCamera || {});
+            // A confident detection can still be a useless crop - e.g. a blurred ear
+            // at the edge of frame, which cleared the confidence bar above but is
+            // unidentifiable by any human or algorithm. Discard those outright too
+            // rather than putting them in front of a reviewer.
+            if (quality.blurScore >= 85 || quality.qualityScore < 35) {
+                skippedFaces.push({
+                    label,
+                    reason: "discarded-unusable-crop",
+                    detail: `blur ${quality.blurScore}%, quality ${quality.qualityScore}%`
+                });
+                continue;
+            }
             if (!quality.accepted) {
                 const embeddingResult = await buildFaceEmbedding(face, faceImage);
                 const trainedMatch = await findBestVectorMatch(null, embeddingResult.vector);
@@ -80,6 +106,34 @@ exports.create = async (req, res, next) => {
                     fallbackLabel: label,
                     qualityScore: quality.qualityScore
                 });
+                // The accepted-quality path below already skips faces that were just
+                // seen - this low-quality-review path didn't, so every detection round
+                // (every 5-15s, across every active camera) wrote a fresh row for
+                // whoever was still sitting in frame. That's what flooded the database.
+                if (matched) {
+                    const recentKnown = await findRecentFaceForPerson(matched.personId, 45);
+                    if (recentKnown) {
+                        skippedFaces.push({
+                            label: matched.name,
+                            reason: "trained-person-already-tracked",
+                            personId: matched.personId,
+                            trackId: track?.id,
+                            matchScore: matched.score
+                        });
+                        continue;
+                    }
+                }
+                const recentDuplicate = await findRecentDuplicateFace(embeddingResult.vector, 15);
+                if (recentDuplicate?.score >= duplicateThresholdForModel(embeddingResult.model)) {
+                    skippedFaces.push({
+                        label: track?.visitorLabel || recentDuplicate.label || "Recent face",
+                        reason: "recent-duplicate",
+                        faceId: recentDuplicate.id,
+                        trackId: track?.id || recentDuplicate.trackId || null,
+                        matchScore: recentDuplicate.score
+                    });
+                    continue;
+                }
                 const reviewLabel = matched?.name || track?.visitorLabel || label;
                 const reviewCategory = matched?.category || track?.category || face.category || "visitor";
                 const reviewIdentity = matched ? identityResultForCategory(matched.category) : (track?.identityResult || "pending");

@@ -20,7 +20,7 @@ export default function CamerasView() {
     reload,
     processPendingFaces
   });
-  // console.log("capture", capture);
+  console.log("capture", capture);
 
   const resumedRef = useRef(false);
   useEffect(() => {
@@ -107,7 +107,11 @@ export default function CamerasView() {
     toast("Camera deleted.");
     await reload();
   }
-
+  console.log(capture.videoRef, "capture.videoref");
+  console.log(capture.canvasRef, "capture.canvasRef");
+  console.log(capture.selectedCameraId, "capture.selectedCameraId");
+  console.log(capture.captureMode, "capture.capturemode");
+  console.log(capture.captureFacesToDb, "camer")
   return (
     <section id="cameras" className="view active">
       <section className="panel">
@@ -118,12 +122,12 @@ export default function CamerasView() {
           </div>
           {/* <button type="button" onClick={addLocalCamera}>Add Local Camera</button> */}
         </div>
-        <div className="local-camera-layout border-2 border-[red]">
-          <div className="video-box  ">
+        <div className="local-camera-layout">
+          <div className="video-box">
             <video ref={capture.videoRef} autoPlay muted playsInline />
             <canvas ref={capture.canvasRef} />
           </div>
-          <div className="local-camera-controls  border-[blue] border-2">
+          <div className="local-camera-controls">
             <label>Capture camera source
               <select value={capture.selectedCameraId} onChange={(event) => capture.selectCamera(event.target.value)}>
                 {data.cameras.length ? data.cameras.map((camera) => (
@@ -133,10 +137,20 @@ export default function CamerasView() {
                 )) : <option value="">Add RTSP or Local Camera first</option>}
               </select>
             </label>
-            <button type="button" onClick={capture.startSelectedCamera}>
+            <button
+              type="button"
+              className={capture.captureMode === "selected" ? "is-active" : ""}
+              disabled={capture.captureMode === "all"}
+              onClick={capture.startSelectedCamera}
+            >
               {capture.captureMode === "all" ? "Selected disabled" : capture.captureMode === "selected" ? "Detection running" : "Start selected camera"}
             </button>
-            <button type="button" onClick={capture.startAllCameras}>
+            <button
+              type="button"
+              className={capture.captureMode === "all" ? "is-active" : ""}
+              disabled={capture.captureMode === "selected"}
+              onClick={capture.startAllCameras}
+            >
               {capture.captureMode === "all" ? "All cameras running" : "Start all cameras"}
             </button>
             <button type="button" onClick={() => capture.captureFacesToDb()}>Detect faces &amp; save capture</button>
@@ -146,17 +160,6 @@ export default function CamerasView() {
             <p>{capture.statusText}</p>
           </div>
         </div>
-        {/* <div className="border-2 border-yellow-400  w-full h-[500px]">
-          <video
-            // src="http://localhost:1984/stream.html?src=cam-entry-door-web&mode=webrtc,mse,hls,mjpeg"
-            src="http://localhost:1984/api/stream.m3u8?src=cam-my-cabin-web"
-            // type="application/x-mpegURL"
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-fulll" />
-
-        </div> */}
       </section>
 
       <section className="panel">

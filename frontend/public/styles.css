@@ -41,6 +41,16 @@ button.danger-button {
   color: #ffd5d5;
   border: 1px solid rgba(255, 87, 87, .42);
 }
+button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  filter: grayscale(.3);
+}
+button.is-active {
+  background: rgba(55,231,212,.16);
+  color: var(--cyan);
+  border: 1px solid rgba(55,231,212,.5);
+}
 input, select {
   width: 100%;
   border: 1px solid var(--line);
@@ -257,7 +267,8 @@ main { padding: 22px; display: grid; gap: 16px; }
   display: grid;
   place-items: center;
 }
-.camera-feed video {
+.camera-feed video,
+.camera-feed img {
   position: absolute;
   inset: 0;
   width: 100%;

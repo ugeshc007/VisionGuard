@@ -1,20 +1,45 @@
-import { useEffect, useRef } from "react";
-import { localizeGatewayUrl, statusClass, cameraRoleLabel } from "../lib/format.js";
-import { attachWebRTC } from "../lib/webrtc.js";
+import { useEffect, useRef, useState } from "react";
+import { isRemoteFrameCamera, localizeGatewayUrl, statusClass, cameraRoleLabel } from "../lib/format.js";
+// import { attachWebRTC } from "../lib/webrtc.js";
 
 export default function CameraCard({ camera, manager = false, siteName, onOpen, onSaveTuning, onDelete }) {
   const videoRef = useRef(null);
   const webrtcUrl = localizeGatewayUrl(camera.webrtcUrl);
   const webrtcPageUrl = localizeGatewayUrl(camera.webrtcPageUrl);
   const playable = camera.playable && webrtcUrl;
+  // The snapshot endpoint grabs a frame directly via ffmpeg off streamUrl - it
+  // doesn't need the camera to be synced to the go2rtc/WebRTC gateway the way
+  // the (currently disabled) live preview did, so gate it on the stream URL
+  // itself rather than `playable`.
+  const hasSnapshot = isRemoteFrameCamera(camera);
+  const [snapshotUrl, setSnapshotUrl] = useState("");
+
+  // Live WebRTC preview - swapped for a single static snapshot below (many
+  // simultaneous live decodes across the Command Center camera wall was
+  // expensive). Re-enable this effect and swap the <img> back to
+  // <video ref={videoRef}> below if a live wall view is wanted again.
+  // useEffect(() => {
+  //   if (!playable || !videoRef.current) return undefined;
+  //   const connection = attachWebRTC(videoRef.current, webrtcUrl);
+  //   return () => {
+  //     try { connection?.destroy(); } catch { /* ignore */ }
+  //   };
+  // }, [playable, webrtcUrl]);
 
   useEffect(() => {
-    if (!playable || !videoRef.current) return undefined;
-    const connection = attachWebRTC(videoRef.current, webrtcUrl);
-    return () => {
-      try { connection?.destroy(); } catch { /* ignore */ }
-    };
-  }, [playable, webrtcUrl]);
+    if (!hasSnapshot || !camera.id) {
+      setSnapshotUrl("");
+      return undefined;
+    }
+    const refresh = () => setSnapshotUrl(`/api/cameras/${encodeURIComponent(camera.id)}/frame?t=${Date.now()}`);
+    refresh();
+    // A single one-time snapshot goes stale forever the moment the camera's
+    // actual feed changes (edited RTSP URL, moved camera, etc). Refreshing
+    // periodically keeps it reasonably current while still being far cheaper
+    // than a continuous live decode per card.
+    const timer = setInterval(refresh, 20000);
+    return () => clearInterval(timer);
+  }, [hasSnapshot, camera.id]);
 
   function handleTuningSubmit(event) {
     event.preventDefault();
@@ -27,9 +52,13 @@ export default function CameraCard({ camera, manager = false, siteName, onOpen, 
       className={`camera-card ${manager ? "manager-card" : ""}`}
       onClick={!manager ? onOpen : undefined}
     >
-      <div className={`camera-feed ${playable ? "has-stream" : ""}`}>
+      <div className={`camera-feed ${hasSnapshot ? "has-stream" : ""}`}>
         <span className="scan-line" />
-        {playable ? <video ref={videoRef} muted autoPlay playsInline /> : <b>{camera.name}</b>}
+        {hasSnapshot
+          ? (snapshotUrl ? <img src={snapshotUrl} alt={`${camera.name} snapshot`} /> : null)
+          : <b>{camera.name}</b>}
+        {/* Live WebRTC preview - see the commented-out effect above.
+        {playable ? <video ref={videoRef} muted autoPlay playsInline /> : <b>{camera.name}</b>} */}
         <span className="camera-overlay-name">{camera.name}</span>
         <span className={`stream-pill ${statusClass(camera.streamStatus)}`}>{camera.streamStatus || "offline"}</span>
       </div>
