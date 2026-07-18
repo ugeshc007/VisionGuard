@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAppData } from "../context/AppDataContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
-import { useCameraCapture } from "../hooks/useCameraCapture.js";
+import { useCameraCapture } from "../hooks/cameraCapture/useCameraCapture.js";
 import { isRemoteFrameCamera } from "../lib/format.js";
 import { SiteSetupPanel, CameraOnboardingPanel, StreamGatewayPanel, CameraGridPanel } from "../components/CameraManagementPanels.jsx";
 

@@ -8,6 +8,7 @@ const { Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..", "..");
 const reportsDir = join(rootDir, "reports");
+const debugFacesDir = join(reportsDir, "debug-faces");
 const embedderPath = join(rootDir, "tools", "insightface_embedder.py");
 
 const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
@@ -80,6 +81,14 @@ export function vectorLiteral(values = []) {
   return `[${normalizeVector(values, 512).join(",")}]`;
 }
 
+async function saveDebugFaceCrop(faceImage, status) {
+  const extension = String(faceImage.mime || "").split("/")[1]?.split("+")[0] || "jpg";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const path = join(debugFacesDir, `${stamp}_${status}.${extension}`);
+  await mkdir(debugFacesDir, { recursive: true });
+  await writeFile(path, faceImage.buffer);
+}
+
 async function runFaceServiceEmbedder(faceImage) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Number(process.env.FACE_EMBEDDING_TIMEOUT_MS || 4500));
@@ -93,7 +102,10 @@ async function runFaceServiceEmbedder(faceImage) {
       }),
       signal: controller.signal
     });
-    if (!response.ok) throw new Error(`Face service ${response.status}`);
+    if (!response.ok) {
+      await saveDebugFaceCrop(faceImage, response.status).catch(() => {});
+      throw new Error(`Face service ${response.status}`);
+    }
     return await response.json();
   } finally {
     clearTimeout(timer);
