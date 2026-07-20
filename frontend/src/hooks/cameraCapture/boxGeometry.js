@@ -1,3 +1,23 @@
+export function padFaceBox(box, frameWidth, frameHeight) {
+  // MediaPipe's box is tight around eyes/nose/mouth, not the full head - left
+  // as-is, both the saved crop and the on-screen box routinely cut off the chin
+  // and forehead. Pad it out (more on top, since hairline/forehead needs more
+  // room than the chin does) so the face reads as complete both on screen and
+  // in what gets saved for embedding.
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  const padX = box.width * 0.3;
+  const padTop = box.height * 0.45;
+  const padBottom = box.height * 0.25;
+  const x = clamp(box.x - padX, 0, frameWidth);
+  const y = clamp(box.y - padTop, 0, frameHeight);
+  return {
+    x,
+    y,
+    width: clamp(box.width + (padX * 2), 1, frameWidth - x),
+    height: clamp(box.height + padTop + padBottom, 1, frameHeight - y)
+  };
+}
+
 export function boxIou(a = {}, b = {}) {
   const x1 = Math.max(a.x || 0, b.x || 0);
   const y1 = Math.max(a.y || 0, b.y || 0);

@@ -30,12 +30,14 @@ export async function identifyFaceOnServer(imageData) {
     });
     const best = (result.matches || [])[0];
     if (!best || !best.personId) return null;
-    // The backend's own "reliable match" bar for its capture pipeline is 0.82,
-    // but that pipeline only ever feeds it pre-vetted face crops. Live tracking
-    // crops aren't vetted at all - a false detection (e.g. a PC case or a
-    // reflection) can still embed to *something*, so require a higher bar here
-    // to avoid confidently mislabeling non-face objects with a real person's name.
-    if (Number(best.similarity) < 0.9) return null;
+    // The backend's own "reliable match" bar for its capture pipeline is 0.55
+    // (real InsightFace/ArcFace cosine similarity on this app's CCTV-angle crops
+    // runs genuine same-person pairs around 0.5-0.9, not near 1.0). That pipeline
+    // only ever feeds it pre-vetted face crops, though, and live tracking crops
+    // aren't vetted at all - a false detection (e.g. a PC case or a reflection)
+    // can still embed to *something*, so require a somewhat higher bar here to
+    // avoid confidently mislabeling non-face objects with a real person's name.
+    if (Number(best.similarity) < 0.6) return null;
     return { personId: best.personId, name: best.displayName || best.label };
   } catch {
     return null;

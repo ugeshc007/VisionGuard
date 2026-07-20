@@ -96,6 +96,14 @@ exports.create = async (req, res, next) => {
             }
             if (!quality.accepted) {
                 const embeddingResult = await buildFaceEmbedding(face, faceImage);
+                if (embeddingResult.rejected) {
+                    skippedFaces.push({
+                        label,
+                        reason: "no-face-detected",
+                        detail: "AI face verification found no face in this crop"
+                    });
+                    continue;
+                }
                 const trainedMatch = await findBestVectorMatch(null, embeddingResult.vector);
                 const matched = isReliableFaceMatch(trainedMatch) ? trainedMatch : null;
                 const track = await getOrCreatePersonTrack({
@@ -210,6 +218,14 @@ exports.create = async (req, res, next) => {
                 continue;
             }
             const embeddingResult = await buildFaceEmbedding(face, faceImage);
+            if (embeddingResult.rejected) {
+                skippedFaces.push({
+                    label,
+                    reason: "no-face-detected",
+                    detail: "AI face verification found no face in this crop"
+                });
+                continue;
+            }
             const trainedMatch = await findBestVectorMatch(null, embeddingResult.vector);
             const matched = isReliableFaceMatch(trainedMatch) ? trainedMatch : null;
             const track = await getOrCreatePersonTrack({

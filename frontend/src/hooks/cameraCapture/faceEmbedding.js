@@ -1,23 +1,5 @@
-import { clamp, makeVisitorCode } from "../../lib/format.js";
-
-export function padFaceBox(box, frameWidth, frameHeight) {
-  // MediaPipe's box is tight around eyes/nose/mouth, not the full head - left
-  // as-is, saved crops routinely cut off the chin and forehead. Pad it out
-  // (more on top, since hairline/forehead needs more room than the chin does)
-  // so the saved image actually shows a complete face. Only used for cropping/
-  // embedding - the on-screen tracking box stays true to what MediaPipe found.
-  const padX = box.width * 0.3;
-  const padTop = box.height * 0.45;
-  const padBottom = box.height * 0.25;
-  const x = clamp(box.x - padX, 0, frameWidth);
-  const y = clamp(box.y - padTop, 0, frameHeight);
-  return {
-    x,
-    y,
-    width: clamp(box.width + (padX * 2), 1, frameWidth - x),
-    height: clamp(box.height + padTop + padBottom, 1, frameHeight - y)
-  };
-}
+import { makeVisitorCode } from "../../lib/format.js";
+import { padFaceBox } from "./boxGeometry.js";
 
 export function cropFace(context, box) {
   const padded = padFaceBox(box, context.canvas.width, context.canvas.height);

@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..", "..");
 const reportsDir = join(rootDir, "reports");
 const debugFacesDir = join(reportsDir, "debug-faces");
+const debugBackendErrorsDir = join(reportsDir, "debug-backend-errors");
 const embedderPath = join(rootDir, "tools", "insightface_embedder.py");
 
 const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
@@ -81,11 +82,11 @@ export function vectorLiteral(values = []) {
   return `[${normalizeVector(values, 512).join(",")}]`;
 }
 
-async function saveDebugFaceCrop(faceImage, status) {
+async function saveDebugFaceCrop(faceImage, status, dir = debugFacesDir) {
   const extension = String(faceImage.mime || "").split("/")[1]?.split("+")[0] || "jpg";
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const path = join(debugFacesDir, `${stamp}_${status}.${extension}`);
-  await mkdir(debugFacesDir, { recursive: true });
+  const path = join(dir, `${stamp}_${status}.${extension}`);
+  await mkdir(dir, { recursive: true });
   await writeFile(path, faceImage.buffer);
 }
 
@@ -103,8 +104,16 @@ async function runFaceServiceEmbedder(faceImage) {
       signal: controller.signal
     });
     if (!response.ok) {
-      await saveDebugFaceCrop(faceImage, response.status).catch(() => {});
-      throw new Error(`Face service ${response.status}`);
+      // 422 means the model actually looked and found no face - a confident verdict,
+      // not a transient failure, so callers should trust it instead of falling back.
+      // Anything else (503, 500, etc.) is the service itself breaking, not a verdict
+      // on the image - keep those crops separate so the two don't get mixed together
+      // when reviewing why matches are failing.
+      const isNoFaceVerdict = response.status === 422;
+      await saveDebugFaceCrop(faceImage, response.status, isNoFaceVerdict ? debugFacesDir : debugBackendErrorsDir).catch(() => {});
+      const error = new Error(`Face service ${response.status}`);
+      if (isNoFaceVerdict) error.noFaceDetected = true;
+      throw error;
     }
     return await response.json();
   } finally {
@@ -132,7 +141,18 @@ function runInsightFaceEmbedder(faceImage) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(stderr || `InsightFace embedder exited ${code}`));
+      if (code !== 0) {
+        // Exit code 4 (tools/insightface_embedder.py) means the model looked and
+        // found no face - a confident verdict, not a transient failure. Any other
+        // code (bad payload, missing deps, other exception) is the backend/embedder
+        // itself breaking, not a verdict on the image - same split as the HTTP
+        // service path above, so the two failure classes don't get mixed together.
+        const isNoFaceVerdict = code === 4;
+        saveDebugFaceCrop(faceImage, code, isNoFaceVerdict ? debugFacesDir : debugBackendErrorsDir).catch(() => {});
+        const error = new Error(stderr || `InsightFace embedder exited ${code}`);
+        if (isNoFaceVerdict) error.noFaceDetected = true;
+        return reject(error);
+      }
       try {
         resolve(JSON.parse(stdout));
       } catch (error) {
@@ -149,21 +169,33 @@ function runInsightFaceEmbedder(faceImage) {
 export async function buildFaceEmbedding(face, faceImage) {
   const sourceEmbedding = Array.isArray(face.embedding) ? face.embedding.map(Number) : [];
   if (faceEmbeddingProvider !== "browser" && faceImage?.buffer) {
-    const service = await runFaceServiceEmbedder(faceImage).catch(() => null);
-    if (service?.embedding?.length) {
-      return {
-        sourceEmbedding: service.embedding,
-        vector: normalizeVector(service.embedding, 512),
-        model: service.model || "insightface-service"
-      };
+    try {
+      const service = await runFaceServiceEmbedder(faceImage);
+      if (service?.embedding?.length) {
+        return {
+          sourceEmbedding: service.embedding,
+          vector: normalizeVector(service.embedding, 512),
+          model: service.model || "insightface-service"
+        };
+      }
+    } catch (error) {
+      // A real detector confidently saying "not a face" (e.g. a PC case fan that
+      // fooled the browser-side detector into drawing a box) is authoritative -
+      // don't paper over it with a synthetic fallback embedding, which is how
+      // non-face crops ended up saved as visitor captures before.
+      if (error?.noFaceDetected) return { rejected: true, reason: "no-face-detected" };
     }
-    const insight = await runInsightFaceEmbedder(faceImage).catch(() => null);
-    if (insight?.embedding?.length) {
-      return {
-        sourceEmbedding: insight.embedding,
-        vector: normalizeVector(insight.embedding, 512),
-        model: insight.model || "insightface"
-      };
+    try {
+      const insight = await runInsightFaceEmbedder(faceImage);
+      if (insight?.embedding?.length) {
+        return {
+          sourceEmbedding: insight.embedding,
+          vector: normalizeVector(insight.embedding, 512),
+          model: insight.model || "insightface"
+        };
+      }
+    } catch (error) {
+      if (error?.noFaceDetected) return { rejected: true, reason: "no-face-detected" };
     }
   }
   return {
@@ -202,7 +234,12 @@ export function isReliableFaceMatch(match = {}) {
   const score = Number(match.score || 0);
   const model = String(match.embeddingModel || "").toLowerCase();
   if (model.includes("browser")) return score >= 0.985;
-  return score >= 0.82;
+  // 0.82 was calibrated for an idealized descriptor - real InsightFace/ArcFace
+  // (buffalo_l) cosine similarity on this app's CCTV-angle crops runs genuine
+  // same-person pairs around 0.5-0.9 (observed directly against trained faces
+  // in this deployment), with cross-person pairs averaging ~0.08. 0.82 rejected
+  // most genuine re-matches, so a trained person was almost never recognized.
+  return score >= 0.55;
 }
 
 export function duplicateThresholdForModel(model = "") {
@@ -681,6 +718,7 @@ export async function searchFaceEvidence(body = {}) {
   } else if (body.imageData) {
     const faceImage = parseDataUrl(body.imageData);
     const embeddingResult = await buildFaceEmbedding({ embedding: [] }, faceImage);
+    if (embeddingResult.rejected) throw new Error("No face detected in the uploaded photo.");
     vector = vectorLiteral(embeddingResult.vector);
   } else {
     throw new Error("Select a detected face or upload a face photo.");

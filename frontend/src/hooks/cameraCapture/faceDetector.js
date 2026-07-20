@@ -23,7 +23,11 @@ async function loadMediaPipeDetector(state) {
       // 0.4 was too permissive - it let round, high-contrast non-face shapes
       // (an RGB PC case fan, glass reflections) through as "faces," which then
       // got sent off for a name lookup and wrongly tagged as a real person.
-      minDetectionConfidence: 0.6
+      // 0.6 still wasn't enough for a particularly bright/symmetric RGB fan in
+      // one deployment's IT cabin camera (confirmed via saved rejected crops in
+      // reports/debug-faces) - raised further, though this trades off some real
+      // faces at extreme angles/distance in wide-FOV CCTV shots.
+      minDetectionConfidence: 0.7
     });
     return state.detector;
   } catch (error) {
