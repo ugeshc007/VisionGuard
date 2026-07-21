@@ -2,7 +2,7 @@ const { sendJson, rows, isGatewayPlayable, id, one, audit } = require("../utils/
 const spawn = require("node:child_process").spawn;
 const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
 const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
-const ffmpegCommand = "C:\\Users\\Muhammad Asif Ganai\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.2-full_build\\bin\\ffmpeg.exe"
+const ffmpegCommand = process.env.FFMPEG_BIN || "ffmpeg";
 
 function cameraStatusFromSource(camera = {}) {
     const streamUrl = String(camera.streamUrl || "").trim();

@@ -2,9 +2,17 @@ node_modules
 npm-debug.log
 visionguard.out.log
 visionguard.err.log
-reports/*.txt
 .env
 .git
 .gitignore
 face-service/__pycache__
 tools/__pycache__
+# Python venv (only used to run face-service locally, not part of any image -
+# that service builds its own env from requirements.txt) and frontend's build
+# output (not served by any container here) - excluding these cut the web/worker
+# build context from ~978MB to a few MB.
+face-service/.venv
+frontend/dist
+# reports/ is a runtime volume (visionguard_reports), not build input - shipping
+# local debug crops into the image is both wasted bytes and stale data.
+reports/

@@ -232,6 +232,19 @@ main { padding: 22px; display: grid; gap: 16px; }
 }
 .video-box video { z-index: 1; }
 .video-box canvas { z-index: 2; pointer-events: none; }
+.video-box.stream-error::after {
+  content: "Stream waiting";
+  position: absolute;
+  inset: auto 10px 10px 10px;
+  z-index: 5;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(7, 16, 24, .82);
+  color: var(--gold);
+  font-size: .72rem;
+  font-weight: 900;
+  text-align: center;
+}
 .local-camera-controls {
   display: grid;
   align-content: start;

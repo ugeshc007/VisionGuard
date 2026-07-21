@@ -19,7 +19,7 @@ const {
 const pg = require("pg");
 
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
+const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
 const pool = new Pool({ connectionString: databaseUrl });
 
 exports.getAll = async (req, res, next) => {

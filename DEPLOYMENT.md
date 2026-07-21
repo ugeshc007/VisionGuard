@@ -28,7 +28,7 @@ notepad .env
 
 For Docker deployment, the compose file already uses internal container URLs:
 
-- Web: `http://localhost:7070`
+- Web: `http://localhost:6969`
 - PostgreSQL: internal `postgres:5432`, host `localhost:5438`
 - Face AI: `http://localhost:8091`
 - Stream gateway: `http://localhost:1984`
@@ -39,10 +39,10 @@ For Docker deployment, the compose file already uses internal container URLs:
 docker compose up -d --build
 ```
 
-The `web` container automatically runs:
+The `backend` container automatically runs:
 
 ```powershell
-node tools/migrate-db.js
+node backend/db/migrate.js
 ```
 
 before starting the server.
@@ -54,37 +54,38 @@ For live testing, do not run the seed command. Add real sites, cameras, rules, a
 If you need demo data on a development laptop only, run:
 
 ```powershell
-docker compose exec web node tools/seed-db.js
+docker compose exec backend node backend/db/seed.js
 ```
 
 Seed data is idempotent, but it creates demo-looking cameras and people, so avoid it on production/live test servers.
 
 ## 6. Open The App
 
-[http://localhost:7070](http://localhost:7070)
+[http://localhost:6969](http://localhost:6969)
 
 For local network access from another device, use the host PC IP:
 
 ```text
-http://YOUR_PC_IP:7070
+http://YOUR_PC_IP:6969
 ```
 
-Make sure Windows Firewall allows inbound port `7070`.
+Make sure Windows Firewall allows inbound port `6969`.
 
 ## 7. Database Migration Commands
 
 Local Node mode:
 
 ```powershell
+cd backend
 npm install
 npm run db:migrate
-npm start
+npm run dev
 ```
 
 Docker mode:
 
 ```powershell
-docker compose exec web node tools/migrate-db.js
+docker compose exec backend node backend/db/migrate.js
 ```
 
 ## 8. Add A New Migration
@@ -92,7 +93,7 @@ docker compose exec web node tools/migrate-db.js
 Create a new SQL file:
 
 ```text
-db/migrations/002_short_description.sql
+backend/db/migrations/002_short_description.sql
 ```
 
 Rules:
@@ -105,13 +106,14 @@ Rules:
 Then run:
 
 ```powershell
+cd backend
 npm run db:migrate
 ```
 
 or:
 
 ```powershell
-docker compose exec web node tools/migrate-db.js
+docker compose exec backend node backend/db/migrate.js
 ```
 
 ## 9. Backup And Restore
@@ -149,7 +151,7 @@ git push -u origin main
 ## 11. Services
 
 - `visionguard-postgres`: PostgreSQL with pgvector
-- `visionguard-web`: Node web/API app
+- `visionguard-backend`: Node web/API app
 - `visionguard-worker`: pending face processing worker
 - `visionguard-face-ai`: InsightFace embedding service
 - `visionguard-stream-gateway`: RTSP/HLS/WebRTC stream gateway

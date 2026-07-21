@@ -1,11 +1,11 @@
+import "dotenv/config";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const { Pool } = pg;
-const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const migrationsDir = join(rootDir, "db", "migrations");
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
 const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
 
 const pool = new Pool({ connectionString: databaseUrl });

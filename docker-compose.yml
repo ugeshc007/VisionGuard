@@ -17,13 +17,14 @@ services:
       timeout: 5s
       retries: 10
 
-  web:
+  backend:
     build:
       context: .
-    container_name: visionguard-web
+      dockerfile: backend/Dockerfile
+    container_name: visionguard-backend
     restart: unless-stopped
     environment:
-      PORT: 7070
+      PORT: 6969
       DATABASE_URL: postgres://visionguard:visionguard_dev_password@postgres:5432/visionguard
       FACE_EMBEDDING_PROVIDER: hybrid
       FACE_EMBEDDING_URL: http://face-ai:8091/embed
@@ -31,7 +32,7 @@ services:
       PUBLIC_STREAM_GATEWAY_URL: http://localhost:1984
       BUSINESS_TIMEZONE: Asia/Dubai
     ports:
-      - "7070:7070"
+      - "6969:6969"
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,23 +42,23 @@ services:
         condition: service_started
     volumes:
       - visionguard_reports:/app/reports
-    command: ["sh", "-c", "node tools/migrate-db.js && node server.js"]
+    command: ["sh", "-c", "node backend/db/migrate.js && node backend/server.js"]
 
   worker:
     build:
       context: .
+      dockerfile: polling-worker/Dockerfile
     container_name: visionguard-worker
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://visionguard:visionguard_dev_password@postgres:5432/visionguard
-      VISIONGUARD_API_BASE: http://web:7070
+      VISIONGUARD_API_BASE: http://backend:6969
       WORKER_INTERVAL_MS: 10000
     depends_on:
       postgres:
         condition: service_healthy
-      web:
+      backend:
         condition: service_started
-    command: ["node", "worker.js"]
 
   face-ai:
     build:
@@ -80,7 +81,18 @@ services:
       - "8555:8555/tcp"
       - "8555:8555/udp"
     volumes:
-      - ./stream-gateway/go2rtc.yaml:/config/go2rtc.yaml:ro
+      - ./stream-gateway/go2rtc.yaml:/config/go2rtc.yaml
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: visionguard-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_started
 
 volumes:
   visionguard_pgdata:

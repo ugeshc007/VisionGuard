@@ -12,7 +12,7 @@ const debugFacesDir = join(reportsDir, "debug-faces");
 const debugBackendErrorsDir = join(reportsDir, "debug-backend-errors");
 const embedderPath = join(rootDir, "tools", "insightface_embedder.py");
 
-const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
+const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
 const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
 const faceEmbeddingProvider = process.env.FACE_EMBEDDING_PROVIDER || "hybrid";
 const faceEmbeddingUrl = process.env.FACE_EMBEDDING_URL || "http://127.0.0.1:8091/embed";
@@ -239,7 +239,7 @@ export function isReliableFaceMatch(match = {}) {
   // same-person pairs around 0.5-0.9 (observed directly against trained faces
   // in this deployment), with cross-person pairs averaging ~0.08. 0.82 rejected
   // most genuine re-matches, so a trained person was almost never recognized.
-  return score >= 0.55;
+  return score >= 0.48;
 }
 
 export function duplicateThresholdForModel(model = "") {

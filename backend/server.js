@@ -4,7 +4,7 @@
 // const pg = require("pg");
 // const { Pool } = pg;
 // const app = express();
-// const port = process.env.PORT || 7070;
+// const port = process.env.PORT || 6969;
 // const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
 // const apiRoutes = require("./routes");
 

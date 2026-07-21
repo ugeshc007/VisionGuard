@@ -11,10 +11,11 @@ export function attachWebRTC(video, url) {
     if (stopped) return;
     video.srcObject = event.streams[0];
     video.play().catch(() => {});
+    video.closest(".camera-feed, .video-box")?.classList.remove("stream-error");
   };
   pc.oniceconnectionstatechange = () => {
     if (["failed", "disconnected", "closed"].includes(pc.iceConnectionState)) {
-      video.closest(".camera-feed")?.classList.add("stream-error");
+      video.closest(".camera-feed, .video-box")?.classList.add("stream-error");
     }
   };
 
@@ -35,7 +36,7 @@ export function attachWebRTC(video, url) {
     if (stopped) return;
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
   })().catch(() => {
-    video.closest(".camera-feed")?.classList.add("stream-error");
+    video.closest(".camera-feed, .video-box")?.classList.add("stream-error");
   });
 
   return {

@@ -1,9 +1,10 @@
+import "dotenv/config";
 import pg from "pg";
 
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
-const apiBase = process.env.VISIONGUARD_API_BASE || "http://127.0.0.1:7070";
-const intervalMs = Number(process.env.WORKER_INTERVAL_MS || 10000);
+const databaseUrl = process.env.DATABASE_URL;
+const apiBase = process.env.VISIONGUARD_API_BASE ;
+const intervalMs = Number(process.env.WORKER_INTERVAL_MS);
 const pool = new Pool({ connectionString: databaseUrl });
 
 async function hasPendingFaces() {
@@ -12,7 +13,11 @@ async function hasPendingFaces() {
 }
 
 async function processFaces() {
-  if (!(await hasPendingFaces())) return;
+  console.log(`[VisionGuard worker] checking for pending face identities at ${new Date().toISOString()}`);
+  if (!(await hasPendingFaces())){
+    console.log(`[VisionGuard worker] no pending face identities found at ${new Date().toISOString()}`);
+    return;
+  } 
   const response = await fetch(`${apiBase}/api/faces/process`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -32,5 +37,5 @@ async function loop() {
   }
 }
 
-console.log(`[VisionGuard worker] started. Polling pending face identities every ${intervalMs}ms.`);
+console.log(`[VisionGuard worker] started. Polling pending face identities every ${intervalMs} ms.`);
 loop();

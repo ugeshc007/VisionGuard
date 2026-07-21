@@ -3,7 +3,7 @@ const { sendSnapshot } = require("../utils/faceEngine.js");
 const pg = require("pg");
 
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
+const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
 const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
 const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
 const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
@@ -125,13 +125,20 @@ async function readLiveSummary() {
     };
 }
 
-exports.getHealth = async (req, res, next) => {
+exports.getHealth = async (req, res) => {
+    const health = {
+        ok: true,
+        at: new Date().toISOString(),
+        database: { type: "postgresql", connected: false }
+    };
     try {
         await pool.query("SELECT 1");
-        res.status(200).json({ ok: true, database: "postgresql", at: new Date().toISOString() });
+        health.database.connected = true;
     } catch (error) {
-        next(error);
+        health.ok = false;
+        health.database.error = error.message;
     }
+    res.status(health.ok ? 200 : 503).json(health);
 };
 
 exports.getDashboard = async (req, res, next) => {

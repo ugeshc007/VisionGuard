@@ -1,8 +1,13 @@
 node_modules/
+frontend/dist/
 .env
 *.log
 reports/*.txt
+reports/debug-faces/
+reports/debug-backend-errors/
 face-service/__pycache__/
 tools/__pycache__/
 *.pyc
 data/
+face-service/.venv/
+stream-gateway/*.exe
