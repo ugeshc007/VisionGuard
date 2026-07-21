@@ -12,11 +12,11 @@ const debugFacesDir = join(reportsDir, "debug-faces");
 const debugBackendErrorsDir = join(reportsDir, "debug-backend-errors");
 const embedderPath = join(rootDir, "tools", "insightface_embedder.py");
 
-const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
-const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
-const faceEmbeddingProvider = process.env.FACE_EMBEDDING_PROVIDER || "hybrid";
-const faceEmbeddingUrl = process.env.FACE_EMBEDDING_URL || "http://127.0.0.1:8091/embed";
-const pythonCommand = process.env.PYTHON || "python";
+const databaseUrl = process.env.DATABASE_URL;
+const businessTimezone = process.env.BUSINESS_TIMEZONE;
+const faceEmbeddingProvider = process.env.FACE_EMBEDDING_PROVIDER;
+const faceEmbeddingUrl = process.env.FACE_EMBEDDING_URL;
+const pythonCommand = process.env.PYTHON;
 
 const pool = new Pool({ connectionString: databaseUrl });
 
@@ -92,7 +92,7 @@ async function saveDebugFaceCrop(faceImage, status, dir = debugFacesDir) {
 
 async function runFaceServiceEmbedder(faceImage) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(process.env.FACE_EMBEDDING_TIMEOUT_MS || 4500));
+  const timer = setTimeout(() => controller.abort(), Number(process.env.FACE_EMBEDDING_TIMEOUT_MS));
   try {
     const response = await fetch(faceEmbeddingUrl, {
       method: "POST",
@@ -132,7 +132,7 @@ function runInsightFaceEmbedder(faceImage) {
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("InsightFace embedder timeout"));
-    }, Number(process.env.FACE_EMBEDDING_TIMEOUT_MS || 4500));
+    }, Number(process.env.FACE_EMBEDDING_TIMEOUT_MS));
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     child.on("error", (error) => {

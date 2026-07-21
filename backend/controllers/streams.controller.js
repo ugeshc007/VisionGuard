@@ -1,6 +1,6 @@
 const { rows, isGatewayPlayable, audit } = require("../utils/utils.js");
 
-const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
+const streamGatewayUrl = process.env.STREAM_GATEWAY_URL.replace(/\/+$/, "");
 
 function cameraAlias(camera = {}) {
     const raw = String(camera.streamAlias || "").trim();
@@ -10,7 +10,7 @@ function cameraAlias(camera = {}) {
 
 async function gatewayRequest(path, options = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number(process.env.STREAM_GATEWAY_TIMEOUT_MS || 3500));
+    const timer = setTimeout(() => controller.abort(), Number(process.env.STREAM_GATEWAY_TIMEOUT_MS));
     try {
         const response = await fetch(`${streamGatewayUrl}${path}`, { ...options, signal: controller.signal });
         const text = await response.text();

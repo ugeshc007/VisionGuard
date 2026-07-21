@@ -3,10 +3,10 @@ const { sendSnapshot } = require("../utils/faceEngine.js");
 const pg = require("pg");
 
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
-const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
-const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
-const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
+const databaseUrl = process.env.DATABASE_URL;
+const businessTimezone = process.env.BUSINESS_TIMEZONE;
+const streamGatewayUrl = process.env.STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const publicStreamGatewayUrl = process.env.PUBLIC_STREAM_GATEWAY_URL.replace(/\/+$/, "");
 const pool = new Pool({ connectionString: databaseUrl });
 
 function today() {

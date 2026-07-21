@@ -1,8 +1,8 @@
 const { sendJson, rows, isGatewayPlayable, id, one, audit } = require("../utils/utils.js");
 const spawn = require("node:child_process").spawn;
-const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
-const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
-const ffmpegCommand = process.env.FFMPEG_BIN || "ffmpeg";
+const streamGatewayUrl = process.env.STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const publicStreamGatewayUrl = process.env.PUBLIC_STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const ffmpegCommand = process.env.FFMPEG_BIN;
 
 function cameraStatusFromSource(camera = {}) {
     const streamUrl = String(camera.streamUrl || "").trim();
@@ -48,7 +48,7 @@ function enrichCameraStream(camera = {}) {
 
 async function gatewayRequest(path, options = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number(process.env.STREAM_GATEWAY_TIMEOUT_MS || 3500));
+    const timer = setTimeout(() => controller.abort(), Number(process.env.STREAM_GATEWAY_TIMEOUT_MS));
     try {
         const response = await fetch(`${streamGatewayUrl}${path}`, { ...options, signal: controller.signal });
         const text = await response.text();
@@ -103,7 +103,7 @@ function captureCameraFrame(camera = {}) {
         const timer = setTimeout(() => {
             child.kill();
             reject(new Error("Timed out while capturing RTSP frame. Check stream URL, network, and camera credentials."));
-        }, Number(process.env.RTSP_FRAME_TIMEOUT_MS || 12000));
+        }, Number(process.env.RTSP_FRAME_TIMEOUT_MS));
         child.stdout.on("data", (chunk) => chunks.push(chunk));
         child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
         child.on("error", (error) => {

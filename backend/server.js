@@ -1,17 +1,4 @@
-// const express = require("express");
-// const bodyParser = require("body-parser");
-// const cors = require("cors");
-// const pg = require("pg");
-// const { Pool } = pg;
-// const app = express();
-// const port = process.env.PORT || 6969;
-// const databaseUrl = process.env.DATABASE_URL || "postgresql://postgres:everfresh@123@127.0.0.1:5432/visionguard";
-// const apiRoutes = require("./routes");
 
-// app.use(cors());
-// app.use(bodyParser.json());
-// app.use(bodyParser.urlencoded({ extended: true }));
-// app.use("/api", apiRoutes);
 
 
 require("dotenv").config({});

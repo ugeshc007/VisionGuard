@@ -1,7 +1,7 @@
 const { rows, one, audit, id, isGatewayPlayable, sendJson } = require("../utils/utils.js");
-const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
-const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
-const businessTimezone = process.env.BUSINESS_TIMEZONE || "Asia/Dubai";
+const streamGatewayUrl = process.env.STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const publicStreamGatewayUrl = process.env.PUBLIC_STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const businessTimezone = process.env.BUSINESS_TIMEZONE;
 
 function today() {
     return new Intl.DateTimeFormat("en-CA", {

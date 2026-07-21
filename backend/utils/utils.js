@@ -1,10 +1,10 @@
 import pg from "pg";
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
+const databaseUrl = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString: databaseUrl });
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
-const streamGatewayUrl = (process.env.STREAM_GATEWAY_URL || "http://127.0.0.1:1984").replace(/\/+$/, "");
-const publicStreamGatewayUrl = (process.env.PUBLIC_STREAM_GATEWAY_URL || "http://localhost:1984").replace(/\/+$/, "");
+const streamGatewayUrl = process.env.STREAM_GATEWAY_URL.replace(/\/+$/, "");
+const publicStreamGatewayUrl = process.env.PUBLIC_STREAM_GATEWAY_URL.replace(/\/+$/, "");
 
 function camel(row = {}) {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [

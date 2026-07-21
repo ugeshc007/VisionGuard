@@ -6,7 +6,7 @@ import pg from "pg";
 
 const { Pool } = pg;
 const seedsDir = join(dirname(fileURLToPath(import.meta.url)), "seeds");
-const databaseUrl = process.env.DATABASE_URL || "postgres://visionguard:visionguard_dev_password@127.0.0.1:5438/visionguard";
+const databaseUrl = process.env.DATABASE_URL;
 
 const pool = new Pool({ connectionString: databaseUrl });
 
