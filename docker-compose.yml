@@ -28,8 +28,15 @@ services:
       DATABASE_URL: postgres://visionguard:visionguard_dev_password@postgres:5432/visionguard
       FACE_EMBEDDING_PROVIDER: hybrid
       FACE_EMBEDDING_URL: http://face-ai:8091/embed
+      FACE_EMBEDDING_TIMEOUT_MS: 4500
       STREAM_GATEWAY_URL: http://stream-gateway:1984
       PUBLIC_STREAM_GATEWAY_URL: http://localhost:1984
+      STREAM_GATEWAY_TIMEOUT_MS: 3500
+      RTSP_FRAME_TIMEOUT_MS: 12000
+      # Local (non-Docker) dev points this at ../stream-gateway/ffmpeg.exe (see backend/.env) -
+      # that's a Windows binary and won't run here. This image's Dockerfile installs ffmpeg via
+      # apk, so it's just on PATH.
+      FFMPEG_BIN: ffmpeg
       BUSINESS_TIMEZONE: Asia/Dubai
     ports:
       - "6969:6969"
@@ -81,7 +88,7 @@ services:
       - "8555:8555/tcp"
       - "8555:8555/udp"
     volumes:
-      - ./stream-gateway/go2rtc.yaml:/config/go2rtc.yaml
+      - ./stream-gateway/go2rtc.docker.yaml:/config/go2rtc.yaml
 
   frontend:
     build:

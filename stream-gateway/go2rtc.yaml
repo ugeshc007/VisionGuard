@@ -1,3 +1,6 @@
+# Local (non-Docker) config: runs go2rtc.exe directly against the Windows ffmpeg.exe
+# next to it. Docker Compose mounts go2rtc.docker.yaml instead, since the
+# alexxit/go2rtc container image ships its own Linux ffmpeg on PATH.
 ffmpeg:
    bin: "./ffmpeg.exe"
 

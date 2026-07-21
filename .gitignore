@@ -11,3 +11,7 @@ tools/__pycache__/
 data/
 face-service/.venv/
 stream-gateway/*.exe
+# go2rtc rewrites its `streams:` section in place with live RTSP credentials
+# once cameras are synced - never let that hit a commit.
+stream-gateway/go2rtc.yaml
+stream-gateway/go2rtc.docker.yaml
