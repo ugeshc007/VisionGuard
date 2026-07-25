@@ -15,3 +15,4 @@ stream-gateway/*.exe
 # once cameras are synced - never let that hit a commit.
 stream-gateway/go2rtc.yaml
 stream-gateway/go2rtc.docker.yaml
+.claude
